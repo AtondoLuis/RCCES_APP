@@ -7,3 +7,12 @@ body { background: var(--background); color: var(--foreground); font-family: Ari
 a { color: inherit; text-decoration: none; }
 button, input, select, textarea { font: inherit; }
 @media print { body { background: white; } .no-print { display: none !important; } }
+
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+button, input, select, textarea {
+  min-height: 44px;
+}

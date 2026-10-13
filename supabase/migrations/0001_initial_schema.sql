@@ -49,3 +49,95 @@ create policy "staff manage cleaning" on public.cleaning_assignments for all to 
 insert into storage.buckets (id, name, public) values ('parish-assets','parish-assets',true), ('mass-images','mass-images',true), ('generated-schedules','generated-schedules',true) on conflict (id) do nothing;
 create policy "authenticated upload parish assets" on storage.objects for insert to authenticated with check (bucket_id in ('parish-assets','mass-images','generated-schedules'));
 create policy "public read parish assets" on storage.objects for select to public using (bucket_id in ('parish-assets','mass-images','generated-schedules'));
+
+alter table public.services add column if not exists stable_key text;
+create unique index if not exists services_stable_key_idx on public.services(stable_key) where stable_key is not null;
+
+create or replace function public.current_user_role() returns public.user_role language sql stable security definer set search_path = public as $$
+  select role from public.profiles where id = (select auth.uid()) limit 1;
+$$;
+create or replace function public.current_parish() returns uuid language sql stable security definer set search_path = public as $$
+  select parish_id from public.profiles where id = (select auth.uid()) limit 1;
+$$;
+create or replace function public.is_staff() returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(public.current_user_role() in ('ADMIN','COORDINADOR'), false);
+$$;
+create or replace function public.is_admin() returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(public.current_user_role() = 'ADMIN', false);
+$$;
+
+create or replace function public.save_mass_with_assignments(
+  mass_id uuid,
+  parish_id uuid,
+  mass_date date,
+  mass_time_id uuid,
+  title text,
+  subtitle text,
+  status public.mass_status,
+  notes text,
+  assignments jsonb
+) returns uuid language plpgsql security invoker as $$
+declare saved_id uuid;
+begin
+  if not public.is_staff() then raise exception 'No autorizado'; end if;
+  insert into public.masses (id, parish_id, mass_date, mass_time_id, title, subtitle, status, notes, created_by, updated_at)
+  values (coalesce(mass_id, gen_random_uuid()), parish_id, mass_date, mass_time_id, title, subtitle, status, notes, auth.uid(), now())
+  on conflict (parish_id, mass_date, mass_time_id) do update set title = excluded.title, subtitle = excluded.subtitle, status = excluded.status, notes = excluded.notes, updated_at = now()
+  returning id into saved_id;
+  delete from public.mass_assignments where mass_assignments.mass_id = saved_id;
+  insert into public.mass_assignments (mass_id, service_id, person_id, display_order)
+  select saved_id, (item->>'service_id')::uuid, (item->>'person_id')::uuid, coalesce((item->>'display_order')::int, 0)
+  from jsonb_array_elements(assignments) item;
+  return saved_id;
+end;
+$$;
+
+drop policy if exists "authenticated read people" on public.people;
+create policy "authenticated read people" on public.people for select to authenticated using (parish_id = public.current_parish());
+drop policy if exists "authenticated read person services" on public.person_services;
+create policy "authenticated read person services" on public.person_services for select to authenticated using (exists(select 1 from public.people p where p.id = person_id and p.parish_id = public.current_parish()));
+drop policy if exists "authenticated read mass times" on public.mass_times;
+create policy "authenticated read mass times" on public.mass_times for select to authenticated using (parish_id = public.current_parish());
+
+
+
+alter table public.services add column if not exists slug text;
+create unique index if not exists services_slug_idx on public.services(slug) where slug is not null;
+update public.services set slug = coalesce(slug, stable_key, lower(regexp_replace(translate(name, 'áéíóúÁÉÍÓÚñÑ', 'aeiouAEIOUnN'), '[^a-zA-Z0-9]+', '-', 'g')));
+
+drop policy if exists "authenticated read availability" on public.person_availability;
+create policy "authenticated read availability" on public.person_availability for select to authenticated using (exists(select 1 from public.people p where p.id = person_id and p.parish_id = public.current_parish()));
+
+drop function if exists public.save_mass_with_assignments(uuid, uuid, date, uuid, text, text, public.mass_status, text, jsonb);
+create or replace function public.save_mass_with_assignments(
+  mass_id uuid,
+  parish_id uuid,
+  mass_date date,
+  mass_time_id uuid,
+  title text,
+  subtitle text,
+  liturgical_cycle text,
+  status public.mass_status,
+  liturgical_text_title text,
+  liturgical_text text,
+  liturgical_text_reference text,
+  image_url text,
+  notes text,
+  assignments jsonb
+) returns uuid language plpgsql security invoker as $$
+declare saved_id uuid;
+begin
+  if not public.is_staff() then raise exception 'No autorizado'; end if;
+  insert into public.masses (id, parish_id, mass_date, mass_time_id, title, subtitle, liturgical_cycle, status, liturgical_text_title, liturgical_text, liturgical_text_reference, image_url, notes, created_by, updated_at)
+  values (coalesce(mass_id, gen_random_uuid()), parish_id, mass_date, mass_time_id, title, subtitle, liturgical_cycle, status, liturgical_text_title, liturgical_text, liturgical_text_reference, image_url, notes, auth.uid(), now())
+  on conflict (parish_id, mass_date, mass_time_id) do update set title = excluded.title, subtitle = excluded.subtitle, liturgical_cycle = excluded.liturgical_cycle, status = excluded.status, liturgical_text_title = excluded.liturgical_text_title, liturgical_text = excluded.liturgical_text, liturgical_text_reference = excluded.liturgical_text_reference, image_url = excluded.image_url, notes = excluded.notes, updated_at = now()
+  returning id into saved_id;
+  delete from public.mass_assignments where mass_assignments.mass_id = saved_id;
+  insert into public.mass_assignments (mass_id, service_id, person_id, display_order)
+  select saved_id, (item->>'service_id')::uuid, (item->>'person_id')::uuid, coalesce((item->>'display_order')::int, 0)
+  from jsonb_array_elements(assignments) item;
+  return saved_id;
+end;
+$$;
+
+
