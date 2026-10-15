@@ -100,7 +100,7 @@ export default function Dashboard() {
   async function saveMass() {
     if (!supabase || !canEdit) return;
     setSaved("Guardando...");
-    const payload = { mass_id: mass.id ?? null, parish_id: parish.id, mass_date: mass.mass_date, mass_time_id: mass.mass_time_id, title: mass.title, subtitle: mass.subtitle, liturgical_cycle: mass.liturgical_cycle, status: mass.status, liturgical_text_title: mass.liturgical_text_title, liturgical_text: mass.liturgical_text, liturgical_text_reference: mass.liturgical_text_reference, image_url: mass.image_url, notes: mass.notes, assignments: Object.entries(assignments).flatMap(([service_id, ids]) => ids.filter(Boolean).map((person_id, display_order) => ({ service_id, person_id, display_order }))) };
+    const payload = { p_mass_id: mass.id ?? null, p_parish_id: parish.id, p_mass_date: mass.mass_date, p_mass_time_id: mass.mass_time_id, p_title: mass.title, p_subtitle: mass.subtitle, p_liturgical_cycle: mass.liturgical_cycle, p_status: mass.status, p_liturgical_text_title: mass.liturgical_text_title, p_liturgical_text: mass.liturgical_text, p_liturgical_text_reference: mass.liturgical_text_reference, p_image_url: mass.image_url, p_notes: mass.notes, p_assignments: Object.entries(assignments).flatMap(([service_id, ids]) => ids.filter(Boolean).map((person_id, display_order) => ({ service_id, person_id, display_order }))) };
     const { data, error: rpcError } = await supabase.rpc("save_mass_with_assignments", payload);
     if (rpcError) { setSaved("Error al guardar"); setError(`No se pudo guardar la comisión completa: ${rpcError.message}`); return; }
     setSaved("Guardado en Supabase"); await loadAll(); router.push(`/comisiones/${String(data)}/editar`);
