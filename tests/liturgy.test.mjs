@@ -34,14 +34,14 @@ test("extracts only the principal title and does not invent a subtitle", () => {
   assert.equal(result.sourceUrl, "https://www.ewtn.com/es/lecturas/2026-07-26");
   assert.deepEqual(Object.keys(result).sort(), ["celebration", "source", "sourceUrl", "subtitle"]);
 });
-test("keeps a solemnity as the main celebration without duplicating octave context", () => {
+test("separates a solemnity from its Christmas octave base without duplicating context", () => {
   const title = "Octava de la Natividad: Solemnidad de la Sant\u00edsima Virgen Mar\u00eda, Madre de Dios";
   const result = liturgy.parseEwtnLiturgy(page(title, "2026-01-01"), "2026-01-01");
-  assert.equal(result.celebration, title.split(": ")[1]);
-  assert.equal(result.subtitle, null);
+  assert.equal(result.celebration, "VIII d\u00eda de la Octava de Navidad");
+  assert.equal(result.subtitle, title.split(": ")[1]);
 });
 test("decodes HTML entities and rejects missing titles or a different date", () => {
-  assert.equal(liturgy.parseEwtnLiturgy(page("  Santos Marta, Mar&iacute;a y L&aacute;zaro (Memoria)  "), "2026-07-26").celebration, "Santos Marta, Mar\u00eda y L\u00e1zaro (Memoria)");
+  assert.equal(liturgy.parseEwtnLiturgy(page("  Santos Marta, Mar&iacute;a y L&aacute;zaro (Memoria)  "), "2026-07-26").subtitle, "Santos Marta, Mar\u00eda y L\u00e1zaro (Memoria)");
   assert.throws(() => liturgy.parseEwtnLiturgy(page(""), "2026-07-26"));
   assert.throws(() => liturgy.parseEwtnLiturgy(page("Title", "2026-07-25"), "2026-07-26"));
   assert.throws(() => liturgy.parseEwtnLiturgy("<html>Unavailable</html>", "2026-07-26"));
@@ -103,6 +103,7 @@ function formHarness() {
     get mass() { return mass; },
     get status() { return hooks[4]; },
     manualTitle(title) { mass = { ...mass, title }; },
+    manualSubtitle(subtitle) { mass = { ...mass, subtitle }; },
     changeDate(date) {
       hookIndex = 0;
       const tree = component({ path: "/comisiones/m/editar", mass, canEdit: true, massTimes: [], services: [], categories: [], settings: {}, assignments: {}, setMass: (update) => { mass = typeof update === "function" ? update(mass) : update; } });
@@ -142,4 +143,49 @@ test("clearing a date cancels pending results; failure leaves manual fields usab
   form.manualTitle("Manual after failure"); assert.equal(form.mass.title, "Manual after failure");
 });
 
+
+
+test("required dates: ordinary Sunday, ferial Monday and Saint Teresa memorial", () => {
+  const cases = [
+    ["2026-07-26", "XVII Domingo Ordinario", "XVII Domingo Ordinario", null],
+    ["2026-07-20", "Lunes de la XVI semana del tiempo ordinario", "Lunes de la XVI semana del tiempo ordinario", null],
+    ["2026-10-15", "Santa Teresa de Jes\u00fas, Virgen, Doctora de la Iglesia (Memoria)", "Jueves de la XXVIII semana del tiempo ordinario", "Santa Teresa de Jes\u00fas, Virgen, Doctora de la Iglesia (Memoria)"],
+  ];
+  for (const [date, title, celebration, subtitle] of cases) {
+    const result = liturgy.parseEwtnLiturgy(page(title, date), date);
+    assert.equal(result.celebration, celebration, date);
+    assert.equal(result.subtitle, subtitle, date);
+    assert.equal(result.source, "EWTN");
+  }
+});
+test("derives temporal weeks for Advent, Lent and Easter from the local calendar", () => {
+  assert.equal(liturgy.baseLiturgicalDay("2026-12-08"), "Martes de la II semana de Adviento");
+  assert.equal(liturgy.baseLiturgicalDay("2026-03-19"), "Jueves de la IV semana de Cuaresma");
+  assert.equal(liturgy.baseLiturgicalDay("2026-05-01"), "Viernes de la IV semana de Pascua");
+  assert.equal(liturgy.baseLiturgicalDay("2026-04-07"), "Martes de la Octava de Pascua");
+  assert.equal(liturgy.baseLiturgicalDay("2026-02-20"), "Viernes despu\u00e9s de Ceniza");
+  assert.equal(liturgy.baseLiturgicalDay("2025-08-20"), "Mi\u00e9rcoles de la XX semana del tiempo ordinario");
+});
+test("keeps temporal Sundays and moves feasts, optional memorials and unranked saints to subtitle", () => {
+  for (const [date, title] of [["2026-11-29", "I Domingo de Adviento"], ["2026-03-01", "II Domingo de Cuaresma"], ["2026-03-29", "Domingo de Ramos"]]) {
+    const result = liturgy.parseEwtnLiturgy(page(title, date), date);
+    assert.equal(result.celebration, title); assert.equal(result.subtitle, null);
+  }
+  for (const [date, title] of [["2026-07-25", "Santiago, Ap\u00f3stol (Fiesta)"], ["2026-07-16", "Nuestra Se\u00f1ora del Carmen (Memoria Libre)"], ["2026-10-15", "Santa Teresa de Jes\u00fas"], ["2026-03-19", "San Jos\u00e9 (Solemnidad)"]]) {
+    const result = liturgy.parseEwtnLiturgy(page(title, date), date);
+    assert.notEqual(result.celebration, title); assert.equal(result.subtitle, title);
+  }
+});
+test("autofills a nonempty subtitle while preserving a manual subtitle edit during a lookup", async () => {
+  const form = formHarness();
+  form.changeDate("2026-10-15");
+  form.requests[0].resolve(Response.json({ celebration: "Jueves de la XXVIII semana del tiempo ordinario", subtitle: "Santa Teresa de Jes\u00fas (Memoria)" }));
+  await settle();
+  assert.equal(form.mass.title, "Jueves de la XXVIII semana del tiempo ordinario");
+  assert.equal(form.mass.subtitle, "Santa Teresa de Jes\u00fas (Memoria)");
+  form.changeDate("2026-10-16"); form.manualSubtitle("Custom subtitle");
+  form.requests[1].resolve(Response.json({ celebration: "Viernes de la XXVIII semana del tiempo ordinario", subtitle: "New memorial" }));
+  await settle();
+  assert.equal(form.mass.subtitle, "Custom subtitle");
+});
 
