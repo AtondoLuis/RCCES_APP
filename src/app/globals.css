@@ -177,7 +177,7 @@ button.primary, a.primary, .btn-primary, button[class~="bg-[#13263d]"], a[class~
 button.primary:hover:not(:disabled), a.primary:hover, .btn-primary:hover:not(:disabled), button[class~="bg-[#13263d]"]:hover:not(:disabled) { background: #1d3a5b; }
 .primary svg, .btn-primary svg { color: white; }
 .service-options { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 0 16px; }
-.schedule-preview { width: 100%; max-width: 780px; height: auto; min-height: 0; padding: 20px; overflow-wrap: anywhere; }
+.schedule-preview { width: 100%; max-width: 780px; height: auto; min-height: 0; aspect-ratio: auto; padding: 20px; overflow-wrap: anywhere; }
 .schedule-preview h1 { font-size: 24px; }
 .category-section { border-top: 1px solid #e2e8f0; padding-top: 24px; margin-top: 24px; }
 .service-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; background: white; min-width: 0; }
@@ -186,5 +186,5 @@ button.primary:hover:not(:disabled), a.primary:hover, .btn-primary:hover:not(:di
   .service-options { grid-template-columns: minmax(0,1fr); }
   header .nav-link { min-height: 36px; padding: 6px 8px; }
   header nav { gap: 2px; }
-  .schedule-preview { padding: 16px; }
+  .schedule-preview { padding: 12px; }
 }

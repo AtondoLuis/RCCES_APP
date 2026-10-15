@@ -20,6 +20,8 @@ function loadTs(path, overrides = {}, globals = {}, suffix = "") {
 }
 const { generateAssignments, getEligiblePeople, scoreCandidate } = loadTs("../src/lib/auto-assign.ts");
 const { loadAutoAssignData } = loadTs("../src/lib/auto-assign-data.ts");
+const { canAssignToService, isAssignedToAnotherService } = loadTs("../src/lib/commission-assignments.ts", { "@/lib/auto-assign": { } });
+const { previewAssignmentNames, repeatedPersonIds } = loadTs("../src/lib/commission-preview.ts", { "@/lib/auto-assign": { } });
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const person = (id, services = ["reading"], patch = {}) => ({ id, parish_id: "p1", active: true, services, ...patch });
 const service = (id = "reading", patch = {}) => ({ id, name: id, active: true, display_order: 1, allow_multiple_people: false, ...patch });
@@ -56,8 +58,13 @@ test("uses maximum distinct matching before allowing any repeated person", () =>
   assert.equal(result.reusedPersonIds.length, 0);
   for (const [id, ids] of Object.entries(result.assignments)) assert(data.people.find((p) => p.id === ids[0]).services.includes(id));
 });
-test("reuses a volunteer only when distinct candidates are insufficient, never twice in the same service", () => {
+test("does not reuse a volunteer across services when multiple services are disabled", () => {
   const result = generateAssignments(input({ services: [service("one", { allow_multiple_people: true }), service("two")], people: [person("a", ["one", "two"])], existingAssignments: { one: ["", ""] } }));
+  assert.equal(result.assignments.one.filter(Boolean).length + result.assignments.two.filter(Boolean).length, 1);
+  assert.deepEqual(plain(result.reusedPersonIds), []);
+});
+test("reuses a volunteer only when multiple services are enabled, never twice in the same service", () => {
+  const result = generateAssignments(input({ allowMultipleServices: true, services: [service("one", { allow_multiple_people: true }), service("two")], people: [person("a", ["one", "two"])], existingAssignments: { one: ["", ""] } }));
   assert.equal(result.assignments.one.filter(Boolean).length, 1);
   assert.equal(result.assignments.two[0], "a");
   assert.deepEqual(plain(result.unfilledServices), ["one"]);
@@ -74,7 +81,7 @@ test("multiple services preserve only the existing UI slot count, defaulting to 
   assert.equal(generateAssignments(data).assignments.reading.length, 1);
   assert.equal(generateAssignments({ ...data, existingAssignments: { reading: ["", ""] } }).assignments.reading.length, 2);
   assert.equal(generateAssignments({ ...data, services: [service()], existingAssignments: { reading: ["", ""] } }).assignments.reading.length, 1);
-  assert.equal(generateAssignments({ ...data, services: [service()], allowMultiplePeople: true, existingAssignments: { reading: ["", ""] } }).assignments.reading.length, 2);
+  assert.equal(generateAssignments({ ...data, services: [service()], allowMultipleServices: true, existingAssignments: { reading: ["", ""] } }).assignments.reading.length, 1);
 });
 test("ignores current, future, cancelled and foreign-parish masses in rotation", () => {
   const data = input({ massId: "current", people: [person("a"), person("b")], masses: [mass("current", "2026-10-18"), mass("future", "2026-10-25"), mass("cancelled", "2026-10-11", { status: "cancelled" }), mass("foreign", "2026-10-11", { parish_id: "p2" })] });
@@ -154,7 +161,7 @@ function controlsHarness(confirm = true, existing = {}) {
   }, { window: { confirm: () => confirm, setTimeout, clearTimeout } }).AutoAssignmentControls;
   return { requests, generated, data,
     cancel() { cleanup?.(); },
-    click() { hookIndex = 0; const tree = Controls({ parishId: "p1", date: "2026-10-18", time: "12:00:00", massTimeId: "time1", people: data.people, services: data.services, assignments: existing, allowMultiplePeople: false, onGenerated: (value) => generated.push(value) }); tree.props.children[0].props.onClick(); },
+    click() { hookIndex = 0; const tree = Controls({ parishId: "p1", date: "2026-10-18", time: "12:00:00", massTimeId: "time1", people: data.people, services: data.services, assignments: existing, allowMultipleServices: false, onGenerated: (value) => generated.push(value) }); tree.props.children[0].props.onClick(); },
     get message() { return hooks[1]; },
   };
 }
@@ -193,6 +200,32 @@ test("no duplicate fallback is necessary even for overlapping authorization grou
   assert.equal(result.reusedPersonIds.length, 0);
 });
 
+test("manual candidates exclude people assigned to another service unless multiple services are enabled", () => {
+  const assignments = { reader: ["juan"], psalm: [""] };
+  assert.equal(isAssignedToAnotherService(assignments, "psalm", "juan"), true);
+  assert.equal(isAssignedToAnotherService(assignments, "reader", "juan"), false);
+  assert.equal(isAssignedToAnotherService(assignments, "psalm", "maria"), false);
+  assert.equal(canAssignToService(assignments, "psalm", "juan", false), false);
+  assert.equal(canAssignToService(assignments, "psalm", "juan", true), true);
+});
+
+test("preview marks repeated people by id and only produces the note condition when needed", () => {
+  const repeated = repeatedPersonIds({ reader: ["juan"], psalm: ["juan"], altar: ["maria"] });
+  assert.deepEqual(plain([...repeated].sort()), ["juan"]);
+  assert.equal(previewAssignmentNames(["juan", "maria"], (id) => id === "juan" ? "Juan Pérez" : "María López", repeated), "Juan Pérez * · María López");
+  const noRepeated = repeatedPersonIds({ reader: ["juan"], psalm: ["maria"] });
+  assert.equal(noRepeated.size, 0);
+  assert.equal(previewAssignmentNames(["juan"], () => "Juan Pérez", noRepeated), "Juan Pérez");
+});
+
+test("preview helpers reflect generated draft assignments without saved data", () => {
+  const before = previewAssignmentNames(["a"], (id) => id.toUpperCase(), repeatedPersonIds({ reader: ["a"] }));
+  const generated = generateAssignments(input({ services: [service("reader"), service("psalm")], people: [person("a", ["reader"]), person("b", ["psalm"])] })).assignments;
+  const after = previewAssignmentNames(generated.psalm, (id) => id.toUpperCase(), repeatedPersonIds(generated));
+  assert.equal(before, "A");
+  assert.equal(after, "B");
+});
+
 test("generated values appear in enabled selects and still call the manual edit handler", () => {
   const React = require("react");
   const Commissions = loadTs("../src/components/dashboard.tsx", {
@@ -200,6 +233,8 @@ test("generated values appear in enabled selects and still call the manual edit 
     "next/link": { default: () => null }, "next/navigation": {},
     "@/lib/supabase/client": { createClient: () => null },
     "@/components/auto-assignment-controls": { AutoAssignmentControls: () => null },
+    "@/lib/commission-assignments": { canAssignToService },
+    "@/lib/commission-preview": { previewAssignmentNames, repeatedPersonIds },
   }, {}, "\nexport { Commissions };").Commissions;
   const generated = generateAssignments(input({ people: [person("a"), person("b")] })).assignments;
   const props = {
@@ -224,4 +259,13 @@ test("generated values appear in enabled selects and still call the manual edit 
   assert.equal(generated.reading[0], "manual");
   select.props.onChange({ target: { value: "" } });
   assert.equal(generated.reading[0], "");
+});
+
+test("PNG export uses the preview node dimensions with no fixed page height", () => {
+  const dashboard = readFileSync(new URL("../src/components/dashboard.tsx", import.meta.url), "utf8");
+  assert.match(dashboard, /width: scrollWidth, height: scrollHeight/);
+  assert.doesNotMatch(dashboard, /height: previewRef\.current\.scrollHeight/);
+  const styles = readFileSync(new URL("../src/app/globals.css", import.meta.url), "utf8");
+  assert.match(styles, /\.schedule-preview\s*\{[^}]*height:\s*auto;[^}]*min-height:\s*0;/);
+  assert.match(styles, /\.schedule-preview\s*\{[^}]*aspect-ratio:\s*auto;/);
 });

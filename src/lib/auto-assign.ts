@@ -46,7 +46,7 @@ export type AutoAssignInput = {
   history: AssignmentHistory[];
   availability: AssignmentAvailability[];
   existingAssignments: AssignmentMap;
-  allowMultiplePeople?: boolean;
+  allowMultipleServices?: boolean;
 };
 
 const dayMs = 86_400_000;
@@ -111,8 +111,7 @@ export function generateAssignments(input: AutoAssignInput): {
   const assignments: AssignmentMap = {};
   const slots: Array<{ serviceId: string; index: number; candidates: string[] }> = [];
   for (const service of services) {
-    const count = service.allow_multiple_people || input.allowMultiplePeople
-      ? Math.max(1, input.existingAssignments[service.id]?.length ?? 0) : 1;
+    const count = service.allow_multiple_people ? Math.max(1, input.existingAssignments[service.id]?.length ?? 0) : 1;
     assignments[service.id] = Array<string>(count).fill("");
     const ranked = getEligiblePeople(input, service).map((person) => {
       const rows = historyByPerson.get(person.id) ?? [];
@@ -159,7 +158,9 @@ export function generateAssignments(input: AutoAssignInput): {
     const slot = slots[index];
     assignments[slot.serviceId][slot.index] = chosen[index];
   }
-  // Reuse across services only after exhausting distinct-person matches; never within one service.
+  // Reuse across services only when the parish setting explicitly allows it.
+  if (!input.allowMultipleServices) return result(assignments, services);
+
   const useCount = new Map<string, number>();
   for (const personId of chosen.filter(Boolean)) useCount.set(personId, (useCount.get(personId) ?? 0) + 1);
   for (const slot of slots) {
@@ -172,6 +173,10 @@ export function generateAssignments(input: AutoAssignInput): {
       useCount.set(picked, (useCount.get(picked) ?? 0) + 1);
     }
   }
+  return result(assignments, services, useCount);
+}
+
+function result(assignments: AssignmentMap, services: AssignmentService[], useCount = new Map<string, number>()) {
   return {
     assignments,
     unfilledServices: services.filter((service) => assignments[service.id].some((id) => !id)).map((service) => service.name),

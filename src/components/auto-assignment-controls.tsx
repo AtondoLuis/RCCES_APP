@@ -15,7 +15,7 @@ type Props = {
   assignments: AssignmentMap;
   people: Array<Pick<AssignmentPerson, "id" | "active" | "services">>;
   services: AssignmentService[];
-  allowMultiplePeople: boolean;
+  allowMultipleServices: boolean;
   onGenerated: (assignments: AssignmentMap) => void;
 };
 
@@ -51,7 +51,7 @@ export function AutoAssignmentControls(props: Props) {
         services: data.services.filter((service) => visibleServices.has(service.id)),
         parishId: props.parishId, date: props.date, massTimeId: props.massTimeId,
         time: props.time, massId: props.massId, existingAssignments: props.assignments,
-        allowMultiplePeople: props.allowMultiplePeople,
+        allowMultipleServices: props.allowMultipleServices,
       });
       props.onGenerated(result.assignments);
       setMessage("Asignaciones generadas. Puedes modificarlas antes de guardar.");
