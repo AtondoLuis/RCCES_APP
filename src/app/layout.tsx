@@ -2,8 +2,9 @@
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Comisiones Santo Toribio",
-  description: "Administración de servidores para la Santa Misa",
+  title: "RCCES",
+  description: "Comisiones para la Santa Misa",
+  applicationName: "RCCES",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
