@@ -88,6 +88,7 @@ function formHarness() {
     },
     "next/link": { default: () => null }, "next/navigation": {},
     "@/lib/supabase/client": { createClient: () => null },
+    "@/components/auto-assignment-controls": { AutoAssignmentControls: () => null },
   }, {
     window: { setTimeout, clearTimeout },
     fetch: (url, options) => new Promise((resolve) => requests.push({ url, options, resolve })),
