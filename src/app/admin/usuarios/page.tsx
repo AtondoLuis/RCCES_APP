@@ -1,8 +1,11 @@
 import { Suspense } from "react";
+import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { AccessError, requireAdmin } from "@/lib/admin-access";
 import UsersAdmin from "@/components/users-admin";
 async function AdminGate() {
+  // Keep request-time Auth inside Suspense when Cache Components is enabled.
+  await connection();
   try { await requireAdmin(); }
   catch (error) {
     if (error instanceof AccessError && error.status === 401) redirect("/login");
@@ -11,4 +14,6 @@ async function AdminGate() {
   }
   return <UsersAdmin />;
 }
-export default function Page() { return <Suspense fallback={<p>Cargando usuarios...</p>}><AdminGate /></Suspense>; }
+export default function Page() {
+  return <Suspense fallback={<p>Cargando usuarios...</p>}><AdminGate /></Suspense>;
+}

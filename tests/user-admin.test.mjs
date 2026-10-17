@@ -173,3 +173,22 @@ for(const [query,method] of [['?code=code-test','exchangeCodeForSession'],['?tok
     assert.deepEqual(h.calls,[method]); assert.deepEqual(h.redirects,['/auth/password']);
   });
 }
+
+test('admin users page waits for a request before rendering its authentication gate', async () => {
+  let release;
+  const requestReady = new Promise((resolve) => { release = resolve; });
+  let authCalls = 0;
+  const load = loader({
+    'next/server': { connection: () => requestReady },
+    '@/lib/admin-access': { AccessError: class extends Error {}, requireAdmin: async () => { authCalls++; } },
+    '@/components/users-admin': { default: () => null },
+  });
+  let rendered = false;
+  const tree = load('src/app/admin/usuarios/page.tsx').default();
+  const gate = tree.props.children.type().then((content) => { rendered = true; return content; });
+  await new Promise(setImmediate);
+  assert.equal(rendered, false); assert.equal(authCalls, 0);
+  release();
+  await gate;
+  assert.equal(authCalls, 1);
+});
