@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WandSparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { generateAssignments, type AssignmentMap, type AssignmentPerson, type AssignmentService } from "@/lib/auto-assign";
+import { generateMassServiceAssignments, type AssignmentMap, type AssignmentPerson, type AssignmentService } from "@/lib/auto-assign";
 import { loadAutoAssignData } from "@/lib/auto-assign-data";
+
+import { generateCleaningAssignments } from "@/lib/cleaning-assign";
+import { getRequiredAssignmentCount, isMassService } from "@/lib/service-rules";
 
 type Props = {
   parishId: string;
@@ -42,7 +45,7 @@ export function AutoAssignmentControls(props: Props) {
       if (controller.signal.aborted) return;
       const visiblePeople = new Map(props.people.map((person) => [person.id, person]));
       const visibleServices = new Set(props.services.map((service) => service.id));
-      const result = generateAssignments({
+      const input = {
         ...data,
         // A newly-authorized person must also be present in the editable selects.
         people: data.people.filter((person) => visiblePeople.get(person.id)?.active).map((person) => ({
@@ -52,11 +55,17 @@ export function AutoAssignmentControls(props: Props) {
         parishId: props.parishId, date: props.date, massTimeId: props.massTimeId,
         time: props.time, massId: props.massId, existingAssignments: props.assignments,
         allowMultipleServices: props.allowMultipleServices,
-      });
-      props.onGenerated(result.assignments);
+      };
+      const result = generateMassServiceAssignments(input);
+      const cleaning = generateCleaningAssignments(input);
+      props.onGenerated({ ...result.assignments, ...cleaning.assignments });
       setMessage("Asignaciones generadas. Puedes modificarlas antes de guardar.");
       setWarning([
-        result.unfilledServices.length ? `No hay servidores disponibles para: ${result.unfilledServices.join(", ")}` : "",
+        ...input.services.filter((service) => service.active && isMassService(service)).map((service) => {
+          const missing = getRequiredAssignmentCount(service, props.assignments[service.id]?.length) - (result.assignments[service.id] ?? []).filter(Boolean).length;
+          return missing > 0 ? `Faltan ${missing} servidores para ${service.name}.` : "";
+        }),
+        cleaning.missingCount ? `Faltan ${cleaning.missingCount} personas para Limpieza.` : "",
         result.reusedPersonIds.length ? "Fue necesario reutilizar servidores por falta de candidatos suficientes." : "",
       ].filter(Boolean).join(" "));
     } catch {

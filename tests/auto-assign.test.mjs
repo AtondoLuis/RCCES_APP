@@ -145,12 +145,12 @@ test("loader rejects incomplete history rather than generating from failed reads
   await assert.rejects(loadAutoAssignData(queryClient({}, "mass_assignments"), "p1", "2026-10-18", new AbortController().signal), /Read failed/);
 });
 
-function controlsHarness(confirm = true, existing = {}) {
+function controlsHarness(confirm = true, existing = {}, patch = {}) {
   let hookIndex = 0;
   let cleanup;
   const hooks = [], generated = [], requests = [];
   const React = require("react");
-  const data = input({ people: [person("a")], services: [service()] });
+  const data = input({ people: [person("a")], services: [service()], ...patch });
   const Controls = loadTs("../src/components/auto-assignment-controls.tsx", {
     react: { ...React,
       useMemo: (fn) => fn(),
@@ -159,13 +159,14 @@ function controlsHarness(confirm = true, existing = {}) {
       useRef: (initial) => { const i = hookIndex++; return hooks[i] ??= { current: initial }; },
     },
     "@/lib/supabase/client": { createClient: () => ({}) },
-    "@/lib/auto-assign": { generateAssignments },
+    "@/lib/auto-assign": { generateMassServiceAssignments: generateAssignments },
     "@/lib/auto-assign-data": { loadAutoAssignData: (...args) => new Promise((resolve, reject) => requests.push({ args, resolve, reject })) },
   }, { window: { confirm: () => confirm, setTimeout, clearTimeout } }).AutoAssignmentControls;
   return { requests, generated, data,
     cancel() { cleanup?.(); },
     click() { hookIndex = 0; const tree = Controls({ parishId: "p1", date: "2026-10-18", time: "12:00:00", massTimeId: "time1", people: data.people, services: data.services, assignments: existing, allowMultipleServices: false, onGenerated: (value) => generated.push(value) }); tree.props.children[0].props.onClick(); },
     get message() { return hooks[1]; },
+    get warning() { return hooks[2]; },
   };
 }
 const settle = () => new Promise(setImmediate);
@@ -363,4 +364,94 @@ test("form renders exactly four collection selects, two offering selects and inc
   assert.equal((html.match(/<select/g) ?? []).length, 9);
   assert(html.includes("Faltan 4 servidores para c."));
   assert(html.includes("Faltan 2 servidores para o."));
+});
+
+const { generateCleaningAssignments } = loadTs("../src/lib/cleaning-assign.ts");
+const cleanService = (id = "clean", patch = {}) => service(id, { slug: "limpieza-mujeres", allow_multiple_people: true, ...patch });
+const cleaningInput = (patch = {}) => input({ services: [cleanService()], people: [person("a", ["clean"]), person("b", ["clean"])], cleaningHistory: [], ...patch });
+test("cleaning uses authorization, active status, parish and date/time availability", () => {
+  const data = cleaningInput({ people: [person("allowed", ["clean"]), person("other-time", ["clean"]), person("unauthorized"), person("inactive", ["clean"], { active: false }), person("foreign", ["clean"], { parish_id: "p2" }), person("day", ["clean"]), person("time", ["clean"])],
+    existingAssignments: { clean: ["", "", "", ""] }, availability: [
+      { person_id: "day", mass_date: "2026-10-18", mass_time_id: null, status: "unavailable" },
+      { person_id: "time", mass_date: "2026-10-18", mass_time_id: "time1", status: "unavailable" },
+      { person_id: "other-time", mass_date: "2026-10-18", mass_time_id: "other", status: "unavailable" },
+    ] });
+  const result = generateCleaningAssignments(data);
+  assert.deepEqual(plain(result.assignments.clean.filter(Boolean).sort()), ["allowed", "other-time"]);
+  assert.equal(result.assignments.clean.length, 4); assert.equal(result.missingCount, 2);
+});
+test("cleaning prioritizes the longest wait using only its own history", () => {
+  const data = cleaningInput({ masses: [mass("recent", "2026-10-11"), mass("old", "2026-08-01")],
+    cleaningHistory: [{ mass_id: "recent", person_id: "a", service_id: "clean" }, { mass_id: "old", person_id: "b", service_id: "clean" }],
+    history: [{ mass_id: "recent", person_id: "b", service_id: "reading" }] });
+  assert.equal(generateCleaningAssignments(data).assignments.clean[0], "b");
+  assert.deepEqual(plain(generateCleaningAssignments({ ...data, history: [] })), plain(generateCleaningAssignments(data)));
+});
+test("fewer recent cleanings wins when the last cleaning date is equal", () => {
+  const data = cleaningInput({ masses: [mass("last", "2026-10-11"), mass("extra", "2026-10-04")], cleaningHistory: [
+    { mass_id: "last", person_id: "a", service_id: "clean" }, { mass_id: "last", person_id: "b", service_id: "clean" },
+    { mass_id: "extra", person_id: "a", service_id: "clean" },
+  ] });
+  assert.equal(generateCleaningAssignments(data).assignments.clean[0], "b");
+});
+for (const status of ["draft", "cancelled", "published", "finished"]) {
+  test(`cleaning rotation handles commission status ${status}`, () => {
+    const base = cleaningInput();
+    const first = generateCleaningAssignments(base).assignments.clean[0];
+    const actual = generateCleaningAssignments({ ...base, masses: [mass("last", "2026-10-11", { status })], cleaningHistory: [{ mass_id: "last", person_id: first, service_id: "clean" }] }).assignments.clean[0];
+    assert.equal(actual === first, status === "draft" || status === "cancelled");
+  });
+}
+test("cleaning ignores current, future, foreign and unlinked history", () => {
+  const base = cleaningInput({ massId: "current" });
+  const first = generateCleaningAssignments(base).assignments.clean[0];
+  const data = { ...base, masses: [mass("current", "2026-10-18", { time: "10:00:00" }), mass("future", "2026-10-19"), mass("foreign", "2026-10-11", { parish_id: "p2" })], cleaningHistory: ["current", "future", "foreign", null].map((mass_id) => ({ mass_id, person_id: first, service_id: "clean" })) };
+  assert.equal(generateCleaningAssignments(data).assignments.clean[0], first);
+});
+test("existing cleaning slots are preserved and unique matching covers overlapping groups", () => {
+  const data = cleaningInput({ services: [cleanService("one"), cleanService("two", { slug: "limpieza-hombres" })], people: [person("flex", ["one", "two"]), person("only", ["one"])], existingAssignments: { one: ["", ""], two: [""] } });
+  const generated = generateCleaningAssignments(data);
+  assert.equal(generated.assignments.one.length, 2); assert.equal(generated.assignments.two.length, 1);
+  assert.equal(generated.assignments.two[0], "flex");
+  assert.equal(generated.assignments.one.filter(Boolean)[0], "only"); assert.equal(generated.missingCount, 1);
+  assert.deepEqual(plain(data.existingAssignments), { one: ["", ""], two: [""] });
+});
+test("same person can serve and clean when liturgical multiple services are disabled, with no star", () => {
+  const data = input({ services: [service(), cleanService()], people: [person("a", ["reading", "clean"])], allowMultipleServices: false });
+  const combined = { ...generateAssignments(data).assignments, ...generateCleaningAssignments(data).assignments };
+  assert.equal(combined.reading[0], "a"); assert.equal(combined.clean[0], "a");
+  assert.equal(repeatedPersonIds(combined, data.services).size, 0);
+});
+test("loader paginates cleaning_assignments and joins masses within the parish", async () => {
+  const rows = Array.from({ length: 501 }, (_, i) => ({ mass_id: `m${i}`, person_id: "a", service_id: "clean" }));
+  const client = queryClient({ cleaning_assignments: rows });
+  const signal = new AbortController().signal;
+  const loaded = await loadAutoAssignData(client, "p1", "2026-10-18", signal);
+  assert.equal(loaded.cleaningHistory.length, 501); assert.equal(loaded.history.length, 0);
+  const calls = client.calls.filter((call) => call.table === "cleaning_assignments");
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].columns, /masses!inner/);
+  assert(calls[0].filters.some(([, key, value]) => key === "parish_id" && value === "p1"));
+  assert(calls[0].filters.some(([, key, value]) => key === "masses.parish_id" && value === "p1"));
+  assert.equal(calls[0].signal, signal);
+  await assert.rejects(loadAutoAssignData(queryClient({}, "cleaning_assignments"), "p1", "2026-10-18", signal), /Read failed/);
+});
+test("one autoassign click generates misa and cleaning and updates the editable preview", async () => {
+  const services = [service("reading", { category_id: "cat" }), cleanService("clean", { category_id: "cat" })];
+  const form = controlsHarness(true, {}, { services, people: [person("a", ["reading", "clean"])] });
+  form.click(); assert.equal(form.requests.length, 1);
+  form.requests[0].resolve(form.data); await settle();
+  assert.equal(form.generated.length, 1);
+  assert.equal(form.generated[0].reading[0], "a"); assert.equal(form.generated[0].clean[0], "a");
+  const props = previewProps({ services, assignments: form.generated[0] });
+  const html = require("react-dom/server").renderToStaticMarkup(require("react").createElement(dashboardComponents.WhatsAppScheduleImage, props));
+  assert(html.includes("reading:")); assert(html.includes("clean:")); assert.equal((html.match(/ A/g) ?? []).length, 2); assert(!html.includes("A *"));
+  form.generated[0].clean[0] = "manual"; assert.equal(form.generated[0].clean[0], "manual");
+});
+test("single-button autoassign reports cleaning shortages while preserving empty positions", async () => {
+  const form = controlsHarness(true, { clean: ["", ""] }, { services: [cleanService()], people: [person("a", ["clean"])] });
+  form.click(); form.requests[0].resolve(form.data); await settle();
+  assert.equal(form.generated[0].clean.length, 2);
+  assert.equal(form.generated[0].clean.filter(Boolean).length, 1);
+  assert.match(form.warning, /Faltan 1 personas para Limpieza\./);
 });

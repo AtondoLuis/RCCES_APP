@@ -57,7 +57,12 @@ const dayMs = 86_400_000;
 const timestamp = (date: string, time: string) => Date.parse(`${date}T${time.length === 5 ? `${time}:00` : time}Z`);
 
 export function getEligiblePeople(input: AutoAssignInput, service: AssignmentService): AssignmentPerson[] {
-  if (!isMassService(service) || !service.active || (service.parish_id && service.parish_id !== input.parishId)) return [];
+  if (!isMassService(service)) return [];
+  return getAvailableAuthorizedPeople(input, service);
+}
+
+export function getAvailableAuthorizedPeople(input: AutoAssignInput, service: AssignmentService): AssignmentPerson[] {
+  if (!service.active || (service.parish_id && service.parish_id !== input.parishId)) return [];
   return input.people.filter((person) => person.active && person.parish_id === input.parishId
     && person.services.includes(service.id)
     && !input.availability.some((record) => record.person_id === person.id
@@ -187,3 +192,5 @@ function result(assignments: AssignmentMap, services: AssignmentService[], useCo
     reusedPersonIds: [...useCount].filter(([, count]) => count > 1).map(([id]) => id),
   };
 }
+
+export const generateMassServiceAssignments = generateAssignments;

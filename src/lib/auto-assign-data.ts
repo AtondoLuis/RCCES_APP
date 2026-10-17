@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AssignmentAvailability, AssignmentHistory, AssignmentMass, AssignmentPerson, AssignmentService } from "./auto-assign";
 
+import type { CleaningHistory } from "./cleaning-assign";
+
 type PageResult<T> = { data: T[] | null; error: { message: string } | null };
 
 async function readPages<T>(read: (from: number, to: number) => PromiseLike<PageResult<T>>): Promise<T[]> {
@@ -17,7 +19,7 @@ type PersonRow = Omit<AssignmentPerson, "services"> & { person_services: { servi
 type MassRow = Omit<AssignmentMass, "time"> & { mass_times: { time: string } | null };
 
 export async function loadAutoAssignData(client: SupabaseClient, parishId: string, date: string, signal: AbortSignal) {
-  const [people, services, masses, history, availability] = await Promise.all([
+  const [people, services, masses, history, availability, cleaningHistory] = await Promise.all([
     readPages((from, to) => client.from("people")
       .select("id,parish_id,active,person_services(service_id)").eq("parish_id", parishId)
       .order("id").range(from, to).abortSignal(signal).returns<PersonRow[]>()),
@@ -37,12 +39,18 @@ export async function loadAutoAssignData(client: SupabaseClient, parishId: strin
       .select("person_id,mass_date,mass_time_id,status,people!inner(parish_id)")
       .eq("people.parish_id", parishId).eq("mass_date", date)
       .order("id").range(from, to).abortSignal(signal).returns<AssignmentAvailability[]>()),
+    readPages((from, to) => client.from("cleaning_assignments")
+      .select("mass_id,person_id,service_id,masses!inner(parish_id,mass_date,status)")
+      .eq("parish_id", parishId).eq("masses.parish_id", parishId)
+      .lte("masses.mass_date", date).neq("masses.status", "cancelled")
+      .order("id").range(from, to).abortSignal(signal).returns<CleaningHistory[]>()),
   ]);
   return {
     people: people.map(({ person_services, ...person }) => ({ ...person, services: person_services.map((row) => row.service_id) })),
     services,
     masses: masses.map(({ mass_times, ...mass }) => ({ ...mass, time: mass_times?.time ?? "23:59:59" })),
     history,
+    cleaningHistory,
     availability,
   };
 }
