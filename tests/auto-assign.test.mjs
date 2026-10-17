@@ -13,7 +13,10 @@ function loadTs(path, overrides = {}, globals = {}, suffix = "") {
   const testModule = { exports: {} };
   vm.runInNewContext(compiled, {
     exports: testModule.exports, module: testModule,
-    require: (name) => name in overrides ? overrides[name] : require(name),
+    require: (name) => name in overrides ? overrides[name]
+      : name.startsWith("@/lib/") ? loadTs(`../src/lib/${name.slice(6)}.ts`)
+      : name.startsWith("./") ? loadTs(`../src/lib/${name.slice(2)}.ts`)
+      : require(name),
     AbortController, console, ...globals,
   });
   return testModule.exports;
@@ -268,4 +271,96 @@ test("PNG export uses the preview node dimensions with no fixed page height", ()
   const styles = readFileSync(new URL("../src/app/globals.css", import.meta.url), "utf8");
   assert.match(styles, /\.schedule-preview\s*\{[^}]*height:\s*auto;[^}]*min-height:\s*0;/);
   assert.match(styles, /\.schedule-preview\s*\{[^}]*aspect-ratio:\s*auto;/);
+});
+
+const rules = loadTs("../src/lib/service-rules.ts");
+const statuses = loadTs("../src/lib/commission-status.ts");
+test("stable service identities define Todos and exact counts even after renaming", () => {
+  assert.equal(rules.fixedServiceText(service("welcome", { stable_key: "bienvenida", name: "Renamed" })), "Todos");
+  assert.equal(rules.getRequiredAssignmentCount(service("collection", { slug: "colecta" })), 4);
+  assert.equal(rules.getRequiredAssignmentCount(service("offering", { stable_key: "ofrenda" })), 2);
+  assert.equal(rules.getRequiredAssignmentCount(service("welcome", { slug: "bienvenida" })), 0);
+});
+test("welcome produces no person rows and auxiliary assignments never produce duplicates or stars", () => {
+  const services = [service("welcome", { slug: "bienvenida" }), service("clean", { slug: "limpieza-hombres" }), service("reading")];
+  const assignments = { welcome: ["a"], clean: ["a"], reading: ["a"] };
+  assert.equal(rules.assignmentRows(assignments, services).some((r) => r.service_id === "welcome"), false);
+  assert.equal(repeatedPersonIds(assignments, services).size, 0);
+  assert.equal(canAssignToService({ clean: ["a"], welcome: ["a"] }, "reading", "a", false, services), true);
+  assert.equal(previewAssignmentNames(["a"], () => "Ana", repeatedPersonIds(assignments, services)), "Ana");
+});
+test("autoassign fills four collection and two offering positions without repeats", () => {
+  const services = [service("c", { slug: "colecta" }), service("o", { slug: "ofrenda" }), service("w", { slug: "bienvenida" }), service("l", { slug: "limpieza-mujeres" })];
+  const data = input({ services, people: Array.from({ length: 6 }, (_, i) => person(String(i), ["c", "o", "w", "l"])) });
+  const generated = generateAssignments(data).assignments;
+  assert.equal(generated.c.length, 4); assert.equal(generated.o.length, 2);
+  assert.equal(new Set(Object.values(generated).flat()).size, 6);
+  assert.equal(generated.w, undefined); assert.equal(generated.l, undefined);
+  const limited = generateAssignments({ ...data, people: [person("only", ["c", "o"])], allowMultipleServices: true }).assignments;
+  assert.equal(limited.c.filter(Boolean).length, 1); assert.equal(limited.o.filter(Boolean).length, 1);
+  assert.equal(limited.c.length, 4); assert.equal(limited.o.length, 2);
+});
+test("draft, cancelled and legacy unknown status are excluded; finished and published count", () => {
+  for (const status of ["draft", "cancelled", null, "unknown"]) assert.equal(statuses.countsForRotation(status), false);
+  for (const status of ["finished", "published"]) assert.equal(statuses.countsForRotation(status), true);
+  const base = input({ people: [person("a"), person("b")], masses: [mass("m", "2026-10-17")], history: [{ mass_id: "m", person_id: "a", service_id: "reading" }] });
+  assert.equal(generateAssignments(base).assignments.reading[0], "b");
+  const empty = generateAssignments({ ...base, masses: [], history: [] }).assignments.reading[0];
+  for (const status of ["draft", "cancelled"]) assert.equal(generateAssignments({ ...base, masses: [mass("m", "2026-10-17", { status })] }).assignments.reading[0], empty);
+});
+test("cleaning and welcome history do not penalize liturgical rotation", () => {
+  const base = input({ services: [service(), service("l", { slug: "limpieza-mujeres" }), service("w", { slug: "bienvenida" })], people: [person("a"), person("b")], masses: [mass("m", "2026-10-17")] });
+  const expected = generateAssignments(base).assignments.reading[0];
+  const actual = generateAssignments({ ...base, history: ["l", "w"].map((service_id) => ({ mass_id: "m", person_id: expected, service_id })) });
+  assert.equal(actual.assignments.reading[0], expected);
+});
+test("status labels and allowed transitions use compatible persisted enum values", () => {
+  assert.equal(statuses.statusLabel("draft"), "Borrador");
+  assert.equal(statuses.statusLabel("published"), "Confirmada");
+  assert.equal(statuses.statusLabel("finished"), "Realizada");
+  assert.equal(statuses.statusLabel("cancelled"), "Cancelada");
+  assert.deepEqual(plain(statuses.statusTransitions("finished")), ["draft"]);
+});
+
+const dashboardComponents = loadTs("../src/components/dashboard.tsx", {
+  "next/link": { default: () => null }, "next/navigation": {},
+  "@/lib/supabase/client": { createClient: () => null },
+  "@/components/auto-assignment-controls": { AutoAssignmentControls: () => null },
+}, {}, "\nexport { Commissions, WhatsAppScheduleImage }; ");
+function previewProps(patch = {}) {
+  return {
+    mass: { mass_date: "2026-10-18", mass_time_id: "t", title: "Misa", status: "published" },
+    massTimes: [], parish: { name: "Parroquia" }, settings: {}, previewRef: { current: null },
+    categories: [{ id: "cat", name: "Servicios" }],
+    services: [service("w", { slug: "bienvenida", category_id: "cat" }), service("c", { slug: "colecta", category_id: "cat" }), service("o", { slug: "ofrenda", category_id: "cat" }), service("l", { slug: "limpieza", category_id: "cat" })],
+    assignments: { w: ["a"], c: ["a", "b", "c", "d"], o: ["e", "f"], l: ["a"] }, personName: (id) => id.toUpperCase(),
+    ...patch,
+  };
+}
+test("rendered preview shows Todos, all collection/offering slots, branding and each status", () => {
+  const { renderToStaticMarkup } = require("react-dom/server");
+  const React = require("react");
+  for (const status of ["draft", "published", "finished", "cancelled"]) {
+    const props = previewProps(); props.mass.status = status;
+    const html = renderToStaticMarkup(React.createElement(dashboardComponents.WhatsAppScheduleImage, props));
+    assert(html.includes(statuses.statusLabel(status)));
+    assert(html.includes("Todos"));
+    for (const id of ["A", "B", "C", "D", "E", "F"]) assert(html.includes(`- ${id}`));
+    assert(!html.includes("A *"));
+    assert(html.includes("/images/santo-patrono.png")); assert(html.includes("/images/parish-logo.png"));
+  }
+});
+test("rendered preview keeps the star for two liturgical roles but never marks cleaning", () => {
+  const props = previewProps(); props.assignments.o = ["a", "f"];
+  const html = require("react-dom/server").renderToStaticMarkup(require("react").createElement(dashboardComponents.WhatsAppScheduleImage, props));
+  assert.equal((html.match(/A \*/g) ?? []).length, 2);
+  assert(html.includes("* Servidor asignado a"));
+});
+test("form renders exactly four collection selects, two offering selects and incomplete notices", () => {
+  const props = previewProps({ path: "/comisiones/nueva", canEdit: true, query: "", peopleFor: () => [], assignments: {}, saved: "Pending" });
+  const html = require("react-dom/server").renderToStaticMarkup(require("react").createElement(dashboardComponents.Commissions, props));
+  // Hour and status + 4 collection + 2 offering + 1 cleaning. Welcome has no select.
+  assert.equal((html.match(/<select/g) ?? []).length, 9);
+  assert(html.includes("Faltan 4 servidores para c."));
+  assert(html.includes("Faltan 2 servidores para o."));
 });

@@ -15,7 +15,10 @@ function loadTs(path, overrides = {}, globals = {}, suffix = "") {
   const testModule = { exports: {} };
   vm.runInNewContext(compiled, {
     module: testModule, exports: testModule.exports,
-    require: (name) => name in overrides ? overrides[name] : require(name),
+    require: (name) => name in overrides ? overrides[name]
+      : name.startsWith("@/lib/") ? loadTs(`../src/lib/${name.slice(6)}.ts`)
+      : name.startsWith("./") ? loadTs(`../src/lib/${name.slice(2)}.ts`)
+      : require(name),
     fetch, AbortController, AbortSignal, Request, Response, URL, console, ...globals,
   });
   return testModule.exports;

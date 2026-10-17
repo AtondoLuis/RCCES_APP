@@ -23,7 +23,7 @@ export async function loadAutoAssignData(client: SupabaseClient, parishId: strin
       .order("id").range(from, to).abortSignal(signal).returns<PersonRow[]>()),
     // Services are a shared catalog in the current schema, not parish-owned rows.
     readPages((from, to) => client.from("services")
-      .select("id,name,active,display_order,allow_multiple_people").eq("active", true)
+      .select("id,name,stable_key,slug,active,display_order,allow_multiple_people")
       .order("id").range(from, to).abortSignal(signal).returns<AssignmentService[]>()),
     readPages((from, to) => client.from("masses")
       .select("id,parish_id,mass_date,mass_time_id,status,mass_times(time)")

@@ -1,3 +1,5 @@
+import { getRequiredAssignmentCount, isMassService } from "./service-rules";
+import { countsForRotation } from "./commission-status";
 export type AssignmentMap = Record<string, string[]>;
 
 export type AssignmentPerson = {
@@ -10,6 +12,8 @@ export type AssignmentPerson = {
 export type AssignmentService = {
   id: string;
   name: string;
+  stable_key?: string | null;
+  slug?: string | null;
   active: boolean;
   display_order: number;
   allow_multiple_people: boolean;
@@ -53,7 +57,7 @@ const dayMs = 86_400_000;
 const timestamp = (date: string, time: string) => Date.parse(`${date}T${time.length === 5 ? `${time}:00` : time}Z`);
 
 export function getEligiblePeople(input: AutoAssignInput, service: AssignmentService): AssignmentPerson[] {
-  if (!service.active || (service.parish_id && service.parish_id !== input.parishId)) return [];
+  if (!isMassService(service) || !service.active || (service.parish_id && service.parish_id !== input.parishId)) return [];
   return input.people.filter((person) => person.active && person.parish_id === input.parishId
     && person.services.includes(service.id)
     && !input.availability.some((record) => record.person_id === person.id
@@ -92,7 +96,7 @@ export function generateAssignments(input: AutoAssignInput): {
   const target = timestamp(input.date, input.time);
   if (!Number.isFinite(target) || !input.parishId || !input.massTimeId) throw new Error("Selecciona una fecha y un horario válidos.");
   const pastMasses = input.masses.filter((mass) => mass.parish_id === input.parishId
-    && mass.id !== input.massId && mass.status !== "cancelled"
+    && mass.id !== input.massId && countsForRotation(mass.status)
     && timestamp(mass.mass_date, mass.time) < target)
     .sort((a, b) => timestamp(b.mass_date, b.time) - timestamp(a.mass_date, a.time) || a.id.localeCompare(b.id));
   const massById = new Map(pastMasses.map((mass) => [mass.id, mass]));
@@ -100,18 +104,18 @@ export function generateAssignments(input: AutoAssignInput): {
   const historyByPerson = new Map<string, Array<AssignmentHistory & { age: number }>>();
   for (const row of input.history) {
     const mass = massById.get(row.mass_id);
-    if (!mass) continue;
+    if (!mass || input.services.some((s) => s.id === row.service_id && !isMassService(s))) continue;
     const age = (Date.parse(`${input.date}T00:00:00Z`) - Date.parse(`${mass.mass_date}T00:00:00Z`)) / dayMs;
     const rows = historyByPerson.get(row.person_id) ?? [];
     rows.push({ ...row, age });
     historyByPerson.set(row.person_id, rows);
   }
-  const services = input.services.filter((service) => service.active
+  const services = input.services.filter((service) => isMassService(service) && service.active
     && (!service.parish_id || service.parish_id === input.parishId));
   const assignments: AssignmentMap = {};
   const slots: Array<{ serviceId: string; index: number; candidates: string[] }> = [];
   for (const service of services) {
-    const count = service.allow_multiple_people ? Math.max(1, input.existingAssignments[service.id]?.length ?? 0) : 1;
+    const count = getRequiredAssignmentCount(service, input.existingAssignments[service.id]?.length ?? 0);
     assignments[service.id] = Array<string>(count).fill("");
     const ranked = getEligiblePeople(input, service).map((person) => {
       const rows = historyByPerson.get(person.id) ?? [];
