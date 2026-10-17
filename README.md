@@ -49,3 +49,14 @@ En Vercel importa el repositorio, define las variables públicas y despliega. En
 - Migración SQL con modelo normalizado, índices, RLS y Storage.
 
 La gestión de personas y catálogos está modelada en Supabase y queda lista para conectar pantallas CRUD administrativas en la siguiente iteración.
+
+
+### Administracion de usuarios
+
+Aplicar la migracion nueva `20261017201021_app_user_administration.sql` antes de desplegar esta version. No reaplicar las migraciones anteriores. Reutiliza `profiles` (id de Auth) y agrega `active` y `person_id` opcional, unico por servidor. Los perfiles historicos sin parroquia quedan sin acceso hasta que se regularicen administrativamente.
+
+Configurar `SUPABASE_SERVICE_ROLE_KEY` exclusivamente en el servidor y `APP_URL` con el origen publico de RCCES. Consultar `.env.example`; no publicar claves reales. En Supabase Auth, autorizar `${APP_URL}/auth/callback` como Redirect URL. La invitacion estandar por email llega a ese callback; tambien se admite una plantilla con `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=invite` (Site URL debe apuntar a RCCES). La cuenta verifica su perfil activo y establece su propia contrasena antes de entrar a comisiones.
+
+Solo ADMIN administra usuarios de su propia parroquia. COORDINADOR mantiene comisiones y servidores; LECTOR solo lectura. No se cambia email ni se eliminan cuentas desde esta UI. `active=false` bloquea rutas, APIs y Data API aun con un JWT vigente; no se borra ni se banea la cuenta de Auth. RLS y un trigger serializado por parroquia impiden quitar el ultimo ADMIN activo. Se conservan las asignaciones y el historial.
+
+El estado de invitacion se obtiene de Auth (`invited_at`, sin confirmacion ni ultimo acceso); no se infiere de la fecha del perfil. Sin clave administrativa el listado y la edicion de perfiles siguen disponibles, pero invitaciones/ultimo acceso no. Si el envio de email tiene exito y la preparacion del perfil falla, la API lo informa explicitamente y la cuenta queda sin acceso hasta reparar el perfil; no se elimina la cuenta de Auth como compensacion. No se agrego infraestructura de auditoria porque el proyecto no tenia una.

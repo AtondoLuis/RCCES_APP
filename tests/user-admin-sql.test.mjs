@@ -1,0 +1,51 @@
+import { readFileSync } from 'node:fs';
+import { PGlite } from '@electric-sql/pglite';
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+test('profiles SQL: last ADMIN, RLS tenants, deactivation/reactivation, and person link constraints', async () => {
+  const db = new PGlite();
+  try {
+  await db.exec(`create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('test.uid',true),'')::uuid $$; create role authenticated; create role anon; create role service_role bypassrls;`);
+  const base=readFileSync(new URL('../supabase/migrations/0001_initial_schema.sql', import.meta.url),'utf8');
+  await db.exec(base.slice(base.indexOf('do $$'),base.indexOf('insert into storage.buckets')));
+  await db.exec(base.slice(base.indexOf('create or replace function public.current_user_role()'),base.indexOf('create or replace function public.save_mass_with_assignments(')));
+  await db.exec(base.slice(base.indexOf('drop policy if exists \"authenticated read people\"'),base.indexOf('drop policy if exists \"authenticated read person services\"')));
+  await db.exec(`grant usage on schema public,auth to authenticated; grant select,insert,update,delete on all tables in schema public to authenticated;`);
+  const id=(i)=>`00000000-0000-0000-0000-${String(i).padStart(12,'0')}`;
+  for(let i=1;i<=7;i++)await db.query('insert into auth.users values($1)',[id(i)]);
+  for(let i=10;i<=11;i++)await db.query('insert into parishes(id,name) values($1,$2)',[id(i),'Parish '+i]);
+  await db.query(`insert into people(id,parish_id,first_name) values($1,$2,'Juan'),($3,$4,'Ana')`,[id(20),id(10),id(21),id(11)]);
+  for(const [i,role,parish] of [[1,'ADMIN',10],[2,'COORDINADOR',10],[3,'LECTOR',10],[4,'ADMIN',11],[5,'LECTOR',11]])await db.query('insert into profiles(id,role,parish_id,full_name) values($1,$2,$3,$4)',[id(i),role,id(parish),'User '+i]);
+  await db.exec(readFileSync(new URL('../supabase/migrations/20261017201021_app_user_administration.sql', import.meta.url),'utf8'));
+  const asUser=async(i)=>{await db.exec('reset role'); await db.query("select set_config('test.uid',$1,false)",[id(i)]);await db.exec('set role authenticated');};
+  await asUser(1);
+  assert.equal((await db.query('select * from profiles')).rows.length,3,'admin sees own parish only');
+  await db.query('update profiles set person_id=$1 where id=$2',[id(20),id(3)]);
+  await assert.rejects(db.query('update profiles set person_id=$1 where id=$2',[id(21),id(3)]),/misma parroquia/);
+  await assert.rejects(db.query('update profiles set person_id=$1 where id=$2',[id(20),id(2)]),/unique/);
+  await assert.rejects(db.query('update profiles set active=false where id=$1',[id(1)]),/ADMIN activo/);
+  await assert.rejects(db.query("update profiles set role='LECTOR' where id=$1",[id(1)]),/ADMIN activo/);
+  await assert.rejects(db.query('update profiles set parish_id=$1 where id=$2',[id(11),id(2)]),/identidad o parroquia/);
+  await asUser(2);
+  assert.equal((await db.query('select * from profiles')).rows.length,1,'coordinator sees self only');
+  assert.equal((await db.query("update profiles set role='ADMIN' where id=$1 returning id",[id(2)])).rows.length,0,'no self escalation');
+  await asUser(3);
+  assert.equal((await db.query('select * from profiles')).rows.length,1);
+  assert.equal((await db.query('select * from parishes')).rows.length,1);
+  await asUser(1);await db.query('update profiles set active=false where id=$1',[id(3)]);
+  await asUser(3);assert.equal((await db.query('select current_user_role() as role,current_parish() as parish')).rows[0].role,null);
+  assert.equal((await db.query('select * from people')).rows.length,0);
+  assert.equal((await db.query('select * from parishes')).rows.length,0);
+  assert.equal((await db.query('select * from profiles')).rows.length,1,'inactive profile may read itself for access message');
+  await asUser(1);await db.query('update profiles set active=true where id=$1',[id(3)]);
+  await asUser(3);assert.equal((await db.query('select * from people')).rows.length,1);
+  await db.exec('reset role');
+  await assert.rejects(db.query('delete from profiles where id=$1',[id(1)]),/ADMIN activo/);
+  await assert.rejects(db.query('update people set parish_id=$1 where id=$2',[id(11),id(20)]),/vinculado/);
+  await db.query("insert into profiles(id,role,parish_id) values($1,'ADMIN',$2)",[id(6),id(10)]);
+  await asUser(1);await db.query('update profiles set active=false where id=$1',[id(1)]);
+  await asUser(6);await assert.rejects(db.query('update profiles set active=false where id=$1',[id(6)]),/ADMIN activo/);
+  console.log('SQL OK: tenant RLS, roles, immediate inactive denial/reactivation, linking, last ADMIN update/delete, protected parish.');
+  } finally { await db.close(); }
+
+});

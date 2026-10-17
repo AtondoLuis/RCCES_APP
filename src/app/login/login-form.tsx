@@ -24,7 +24,13 @@ export default function LoginForm() {
       setError(signInError.message);
       return;
     }
-    router.replace("/");
+    const { data: auth } = await supabase.auth.getUser();
+    const { data: profile, error: profileError } = await supabase.from("profiles").select("active,parish_id").eq("id", auth.user?.id ?? "").maybeSingle();
+    if (profileError || !profile?.active || !profile.parish_id) {
+      await supabase.auth.signOut();
+      setError(profileError ? "No se pudo verificar tu perfil." : "Tu acceso est\u00e1 desactivado o no tienes un perfil autorizado."); return;
+    }
+    router.replace("/comisiones");
     router.refresh();
   }
 

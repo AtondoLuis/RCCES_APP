@@ -13,7 +13,8 @@ import { previewAssignmentNames, repeatedPersonIds } from "@/lib/commission-prev
 import { fixedServiceText, isMassService, getRequiredAssignmentCount, hasFixedAssignmentCount, assignmentRows } from "@/lib/service-rules";
 import { statusLabel, statusTransitions } from "@/lib/commission-status";
 
-type Role = "ADMIN" | "COORDINADOR" | "LECTOR";
+import { permissionsFor, type AppRole } from "@/lib/permissions";
+type Role = AppRole;
 type Category = { id: string; name: string; display_order: number };
 type Service = { id: string; stable_key: string | null; slug: string | null; category_id: string; name: string; allow_multiple_people: boolean; active: boolean; display_order: number };
 type Person = { id: string; first_name: string; last_name: string; display_name: string | null; phone: string | null; whatsapp: string | null; email: string | null; gender: string | null; active: boolean; notes: string | null; services: string[] };
@@ -50,8 +51,8 @@ export default function Dashboard() {
   const [originalStatus, setOriginalStatus] = useState("draft");
   const [query, setQuery] = useState("");
   const [saved, setSaved] = useState("Cambios pendientes");
-  const canEdit = role === "ADMIN" || role === "COORDINADOR";
-  const canAdmin = role === "ADMIN";
+  const canEdit = permissionsFor(role).editCommissions;
+  const canAdmin = permissionsFor(role).manageConfiguration;
   const massId = pathname.match(/^\/comisiones\/([^/]+)/)?.[1];
   const personId = pathname.match(/^\/servidores\/([^/]+)/)?.[1];
 
@@ -158,9 +159,9 @@ export default function Dashboard() {
   </Shell>;
 }
 
-function Shell({ children, role, onLogout }: { children: React.ReactNode; role: Role; onLogout?: () => void }) {
+export function Shell({ children, role, onLogout }: { children: React.ReactNode; role: Role; onLogout?: () => void }) {
   const currentPath = usePathname() || "/";
-  const nav = [["/comisiones", "Comisiones"], ["/servidores", "Servidores"], ["/admin/servicios", "Servicios"], ["/admin/horarios", "Horarios"], ["/admin/parroquia", "Parroquia"], ["/admin/configuracion", "Configuración"]];
+  const nav = [["/comisiones", "Comisiones"], ["/servidores", "Servidores"], ["/admin/servicios", "Servicios"], ["/admin/horarios", "Horarios"], ["/admin/parroquia", "Parroquia"], ["/admin/configuracion", "Configuración"], ["/admin/usuarios", "Usuarios"]].filter(([href]) => !href.startsWith("/admin") || permissionsFor(role).manageConfiguration);
   return <div className="min-h-screen bg-[#f7f8fa] text-slate-900"><header className="sticky top-0 z-20 border-b border-slate-200 bg-white"><div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-2 px-4 py-2 sm:px-8"><Link href="/" className="font-serif text-xl font-bold text-[#13263d]">Santo Toribio Romo</Link><nav className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-600">{nav.map(([href, name]) => <Link key={href} href={href} className={`nav-link ${currentPath === href || currentPath.startsWith(`${href}/`) ? "nav-link-active" : ""}`}>{name}</Link>)}<span className="status-pill">{role}</span>{onLogout && <button onClick={onLogout} className="border border-slate-300 bg-white text-slate-700 hover:border-[#13263d] hover:text-[#13263d]" aria-label="Salir"><LogOut size={17}/></button>}</nav></div></header><main className="mx-auto max-w-[1440px] px-4 py-7 sm:px-8">{children}</main></div>;
 }
 function State({ text }: { text: string }) { return <div className="card-panel p-6 text-slate-600">{text}</div>; }
