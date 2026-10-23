@@ -11,6 +11,7 @@ export type AssignmentPerson = {
 
 export type AssignmentService = {
   id: string;
+  category_id?: string;
   name: string;
   stable_key?: string | null;
   slug?: string | null;
@@ -51,6 +52,7 @@ export type AutoAssignInput = {
   history: AssignmentHistory[];
   availability: AssignmentAvailability[];
   existingAssignments: AssignmentMap;
+  reservedAssignments?: AssignmentMap;
   allowMultipleServices?: boolean;
 };
 
@@ -119,11 +121,12 @@ export function generateAssignments(input: AutoAssignInput): {
   const services = input.services.filter((service) => isMassService(service) && service.active
     && (!service.parish_id || service.parish_id === input.parishId));
   const assignments: AssignmentMap = {};
+  const reserved = new Set(Object.values(input.reservedAssignments ?? {}).flat().filter(Boolean));
   const slots: Array<{ serviceId: string; index: number; candidates: string[] }> = [];
   for (const service of services) {
     const count = getRequiredAssignmentCount(service, input.existingAssignments[service.id]?.length ?? 0);
     assignments[service.id] = Array<string>(count).fill("");
-    const ranked = getEligiblePeople(input, service).map((person) => {
+    const ranked = getEligiblePeople(input, service).filter((person) => input.allowMultipleServices || !reserved.has(person.id)).map((person) => {
       const rows = historyByPerson.get(person.id) ?? [];
       const sameService = rows.filter((row) => row.service_id === service.id);
       return { id: person.id, score: scoreCandidate({
@@ -145,14 +148,14 @@ export function generateAssignments(input: AutoAssignInput): {
   const owners = new Map<string, number>();
   const chosen: string[] = Array(slots.length).fill("");
   function match(slotIndex: number, visited: Set<string>): boolean {
-    const free = slots[slotIndex].candidates.find((id) => !visited.has(id) && !owners.has(id));
+    const free = slots[slotIndex].candidates.find((id) => !reserved.has(id) && !visited.has(id) && !owners.has(id));
     if (free) {
       owners.set(free, slotIndex);
       chosen[slotIndex] = free;
       return true;
     }
     for (const personId of slots[slotIndex].candidates) {
-      if (visited.has(personId)) continue;
+      if (reserved.has(personId) || visited.has(personId)) continue;
       visited.add(personId);
       const owner = owners.get(personId);
       if (owner === undefined || match(owner, visited)) {
@@ -172,6 +175,7 @@ export function generateAssignments(input: AutoAssignInput): {
   if (!input.allowMultipleServices) return result(assignments, services);
 
   const useCount = new Map<string, number>();
+  for (const personId of reserved) useCount.set(personId, 1);
   for (const personId of chosen.filter(Boolean)) useCount.set(personId, (useCount.get(personId) ?? 0) + 1);
   for (const slot of slots) {
     if (assignments[slot.serviceId][slot.index]) continue;

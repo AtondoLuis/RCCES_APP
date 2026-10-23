@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WandSparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { generateMassServiceAssignments, type AssignmentMap, type AssignmentPerson, type AssignmentService } from "@/lib/auto-assign";
+import { type AssignmentMap, type AssignmentPerson, type AssignmentService } from "@/lib/auto-assign";
+import { generateCommissionAssignments } from "@/lib/assignment-generation";
 import { loadAutoAssignData } from "@/lib/auto-assign-data";
 
-import { generateCleaningAssignments } from "@/lib/cleaning-assign";
 import { getRequiredAssignmentCount, isMassService } from "@/lib/service-rules";
 
 type Props = {
@@ -18,6 +18,7 @@ type Props = {
   assignments: AssignmentMap;
   people: Array<Pick<AssignmentPerson, "id" | "active" | "services">>;
   services: AssignmentService[];
+  categories: Array<{ id: string; name: string }>;
   allowMultipleServices: boolean;
   onGenerated: (assignments: AssignmentMap) => void;
 };
@@ -30,9 +31,10 @@ export function AutoAssignmentControls(props: Props) {
   const request = useRef<AbortController | null>(null);
   useEffect(() => () => { request.current?.abort(); }, [props.assignments]);
 
-  async function generate() {
+  async function generate(categoryId?: string) {
     if (busy || request.current || !client || !props.date || !props.time || !props.massTimeId) return;
-    if (Object.values(props.assignments).some((ids) => ids.some(Boolean))
+    const targetIds = new Set(props.services.filter((service) => !categoryId || service.category_id === categoryId).map((service) => service.id));
+    if ((!categoryId ? Object.values(props.assignments).some((ids) => ids.some(Boolean)) : Object.entries(props.assignments).some(([id, ids]) => targetIds.has(id) && ids.some(Boolean)))
       && !window.confirm("Esto reemplazará las asignaciones actuales. ¿Continuar?")) return;
     const controller = new AbortController();
     request.current = controller;
@@ -56,12 +58,11 @@ export function AutoAssignmentControls(props: Props) {
         time: props.time, massId: props.massId, existingAssignments: props.assignments,
         allowMultipleServices: props.allowMultipleServices,
       };
-      const result = generateMassServiceAssignments(input);
-      const cleaning = generateCleaningAssignments(input);
-      props.onGenerated({ ...result.assignments, ...cleaning.assignments });
+      const { assignments, mass: result, cleaning, services } = generateCommissionAssignments(input, categoryId);
+      props.onGenerated(assignments);
       setMessage("Asignaciones generadas. Puedes modificarlas antes de guardar.");
       setWarning([
-        ...input.services.filter((service) => service.active && isMassService(service)).map((service) => {
+        ...services.filter((service) => service.active && isMassService(service)).map((service) => {
           const missing = getRequiredAssignmentCount(service, props.assignments[service.id]?.length) - (result.assignments[service.id] ?? []).filter(Boolean).length;
           return missing > 0 ? `Faltan ${missing} servidores para completar ${service.name}.` : "";
         }),
@@ -84,6 +85,7 @@ export function AutoAssignmentControls(props: Props) {
       className="primary w-full text-sm sm:w-auto" aria-busy={busy}>
       <WandSparkles size={17}/> Asignar automáticamente
     </button>
+    <div className="flex flex-wrap gap-2">{(props.categories ?? []).filter((category) => props.services.some((service) => service.active && service.category_id === category.id)).map((category) => <button key={category.id} type="button" onClick={() => void generate(category.id)} disabled={busy || !client || !props.date || !props.time} className="rounded-lg border bg-white px-3 py-2 text-sm font-semibold" aria-label={`Asignar sección: ${category.name}`}>Asignar sección: {category.name}</button>)}</div>
     <p role="status" aria-live="polite" className="text-sm text-slate-600">{message}</p>
     {warning && <p role="status" className="text-sm text-amber-800">{warning}</p>}
   </div>;

@@ -164,7 +164,7 @@ function controlsHarness(confirm = true, existing = {}, patch = {}) {
   }, { window: { confirm: () => confirm, setTimeout, clearTimeout } }).AutoAssignmentControls;
   return { requests, generated, data,
     cancel() { cleanup?.(); },
-    click() { hookIndex = 0; const tree = Controls({ parishId: "p1", date: "2026-10-18", time: "12:00:00", massTimeId: "time1", people: data.people, services: data.services, assignments: existing, allowMultipleServices: false, onGenerated: (value) => generated.push(value) }); tree.props.children[0].props.onClick(); },
+    click(categoryId) { hookIndex = 0; const categories = [...new Set(data.services.map((item) => item.category_id).filter(Boolean))].map((id) => ({ id, name: id })); const tree = Controls({ parishId: "p1", date: "2026-10-18", time: "12:00:00", massTimeId: "time1", people: data.people, services: data.services, categories, assignments: existing, allowMultipleServices: false, onGenerated: (value) => generated.push(value) }); const button = categoryId ? tree.props.children[1].props.children.find((item) => item.key === categoryId) : tree.props.children[0]; button.props.onClick(); },
     get message() { return hooks[1]; },
     get warning() { return hooks[2]; },
   };
@@ -608,4 +608,89 @@ test("dashboard server counts use current-parish data and render active and inac
   assert(!html.includes("3 activos"));
   const source = readFileSync(new URL("../src/components/dashboard.tsx", import.meta.url), "utf8");
   assert.match(source, /from\("people"\).*?eq\("parish_id", ownerParishId\)/);
+});
+
+const { generateCommissionAssignments } = loadTs("../src/lib/assignment-generation.ts");
+const { togglePreviewVisibility } = loadTs("../src/lib/preview-visibility.ts");
+
+test("section reassignment replaces its slots, preserves other sections, and respects required servers", () => {
+  const data = input({
+    services: [service("reading", { category_id: "word", required_servers: 2 }), service("offering", { category_id: "altar" })],
+    people: [person("a", ["reading", "offering"]), person("b", ["reading"]), person("c", ["reading"])],
+    existingAssignments: { reading: ["a", "c"], offering: ["a"] },
+  });
+  const generated = generateCommissionAssignments(data, "word").assignments;
+  assert.deepEqual(plain(generated.offering), ["a"]);
+  assert.equal(generated.reading.length, 2);
+  assert(!generated.reading.includes("a"));
+  assert.deepEqual(plain(data.existingAssignments.reading), ["a", "c"]);
+});
+
+test("section reassignment can reuse outside volunteers only when multiple services is on", () => {
+  const data = input({
+    services: [service("reading", { category_id: "word" }), service("offering", { category_id: "altar" })],
+    people: [person("a", ["reading", "offering"])],
+    existingAssignments: { reading: ["old"], offering: ["a"] },
+  });
+  assert.equal(generateCommissionAssignments(data, "word").assignments.reading[0], "");
+  assert.equal(generateCommissionAssignments({ ...data, allowMultipleServices: true }, "word").assignments.reading[0], "a");
+  assert.equal(Object.values(generateCommissionAssignments(data).assignments).flat().filter(Boolean).length, 1);
+});
+
+test("section assignment uses the cleaning engine only for its own section", () => {
+  const data = cleaningInput({
+    services: [cleanService("clean", { category_id: "care", required_servers: 2 }), service("reading", { category_id: "word" })],
+    people: [person("a", ["clean", "reading"]), person("b", ["clean"])],
+    existingAssignments: { clean: ["old", "old"], reading: ["a"] },
+  });
+  const result = generateCommissionAssignments(data, "care").assignments;
+  assert.deepEqual(plain(result.reading), ["a"]);
+  assert.equal(result.clean.length, 2);
+  assert.deepEqual(new Set(result.clean), new Set(["a", "b"]));
+});
+
+test("hiding a service or section changes the preview and restoring it recovers existing assignments", () => {
+  const React = require("react");
+  const render = (props) => require("react-dom/server").renderToStaticMarkup(React.createElement(dashboardComponents.WhatsAppScheduleImage, props));
+  const props = previewProps({
+    categories: [{ id: "word", name: "Palabra" }, { id: "altar", name: "Altar" }],
+    services: [service("reading", { category_id: "word" }), service("offering", { category_id: "altar" })],
+    assignments: { reading: ["a"], offering: ["b"] },
+  });
+  const initial = render(props);
+  assert(initial.includes("A")); assert(initial.includes("B"));
+  props.mass.preview_visibility = togglePreviewVisibility(null, "service", "reading");
+  const serviceHidden = render(props);
+  assert(!serviceHidden.includes("reading:")); assert(serviceHidden.includes("offering:"));
+  assert.deepEqual(plain(props.assignments.reading), ["a"]);
+  props.mass.preview_visibility = togglePreviewVisibility(props.mass.preview_visibility, "category", "altar");
+  const sectionHidden = render(props);
+  assert(!sectionHidden.includes("Altar")); assert(!sectionHidden.includes("offering:"));
+  props.mass.preview_visibility = togglePreviewVisibility(props.mass.preview_visibility, "service", "reading");
+  props.mass.preview_visibility = togglePreviewVisibility(props.mass.preview_visibility, "category", "altar");
+  assert.equal(render(props), initial);
+  assert.match(readFileSync(new URL("../src/components/dashboard.tsx", import.meta.url), "utf8"), /toPng\(previewRef\.current/);
+});
+
+test("section control updates the editable draft without saving", async () => {
+  const form = controlsHarness(true, { reading: ["manual"], offering: ["locked"] }, {
+    services: [service("reading", { category_id: "word" }), service("offering", { category_id: "altar" })],
+    people: [person("a", ["reading"]), person("b", ["offering"])],
+  });
+  form.click("word");
+  form.requests[0].resolve(form.data);
+  await settle();
+  assert.equal(form.generated[0].reading[0], "a");
+  assert.deepEqual(plain(form.generated[0].offering), ["locked"]);
+});
+
+test("section rotation ignores cleaning history outside the selected section", () => {
+  const base = input({
+    services: [service("reading", { category_id: "word" }), cleanService("clean", { category_id: "care" })],
+    people: [person("a", ["reading", "clean"]), person("b", ["reading"])],
+    masses: [mass("old", "2026-10-11")],
+  });
+  const first = generateCommissionAssignments(base, "word").assignments.reading[0];
+  const withCleaning = { ...base, history: [{ mass_id: "old", person_id: first, service_id: "clean" }] };
+  assert.equal(generateCommissionAssignments(withCleaning, "word").assignments.reading[0], first);
 });

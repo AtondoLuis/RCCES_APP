@@ -53,6 +53,16 @@ test("SQL migrations: configurable slots, liturgy-only writes, confirmed-only le
     assert.equal((await save("published")).rows[0].id,id(700));
     assert.equal((await db.query("select * from mass_assignments where mass_id=$1",[id(700)])).rows.length,1);
     assert.equal((await db.query("select * from cleaning_assignments where mass_id=$1",[id(700)])).rows.length,1);
+    const visibility = { hidden_categories: [id(400)], hidden_services: [id(502)] };
+    const savePreview = (value) => db.query("select save_mass_with_preview($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) as id",
+      [id(700),id(100),"2026-11-01",id(300),"New Mass",null,null,"published",null,null,null,null,null,
+        JSON.stringify([{service_id:id(502),person_id:id(200),display_order:0},{service_id:id(504),person_id:id(200),display_order:0},{service_id:id(503),person_id:id(201),display_order:0}]),JSON.stringify(value)]);
+    assert.equal((await savePreview(visibility)).rows[0].id,id(700));
+    assert.deepEqual((await db.query("select preview_visibility from masses where id=$1",[id(700)])).rows[0].preview_visibility,visibility);
+    assert.equal((await db.query("select * from mass_assignments where mass_id=$1",[id(700)])).rows.length,1);
+    assert.equal((await db.query("select * from cleaning_assignments where mass_id=$1",[id(700)])).rows.length,1);
+    assert.equal((await savePreview({ hidden_categories: [], hidden_services: [] })).rows[0].id,id(700));
+    assert.deepEqual((await db.query("select preview_visibility from masses where id=$1",[id(700)])).rows[0].preview_visibility,{ hidden_categories: [], hidden_services: [] });
     await assert.rejects(save("finished"));
     await asUser(3);
     assert.equal((await db.query("select * from masses")).rows.length,2);
