@@ -23,8 +23,9 @@ function loadTs(path, overrides = {}, globals = {}, suffix = "") {
 }
 const { generateAssignments, getEligiblePeople, scoreCandidate } = loadTs("../src/lib/auto-assign.ts");
 const { loadAutoAssignData } = loadTs("../src/lib/auto-assign-data.ts");
-const { canAssignToService, isAssignedToAnotherService } = loadTs("../src/lib/commission-assignments.ts", { "@/lib/auto-assign": { } });
+const { assignedMassServiceNames, canAssignToService, isAssignedToAnotherService } = loadTs("../src/lib/commission-assignments.ts", { "@/lib/auto-assign": { } });
 const { previewAssignmentNames, repeatedPersonIds } = loadTs("../src/lib/commission-preview.ts", { "@/lib/auto-assign": { } });
+const { countPeopleByStatus } = loadTs("../src/lib/dashboard-metrics.ts");
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const person = (id, services = ["reading"], patch = {}) => ({ id, parish_id: "p1", active: true, services, ...patch });
 const service = (id = "reading", patch = {}) => ({ id, name: id, active: true, display_order: 1, allow_multiple_people: false, required_servers: 1, ...patch });
@@ -236,7 +237,7 @@ test("generated values appear in enabled selects and still call the manual edit 
     "next/link": { default: () => null }, "next/navigation": {},
     "@/lib/supabase/client": { createClient: () => null },
     "@/components/auto-assignment-controls": { AutoAssignmentControls: () => null },
-    "@/lib/commission-assignments": { canAssignToService },
+    "@/lib/commission-assignments": { assignedMassServiceNames, canAssignToService },
     "@/lib/commission-preview": { previewAssignmentNames, repeatedPersonIds },
   }, {}, "\nexport { Commissions };").Commissions;
   const generated = generateAssignments(input({ people: [person("a"), person("b")] })).assignments;
@@ -323,10 +324,10 @@ test("status labels and allowed transitions use compatible persisted enum values
 });
 
 const dashboardComponents = loadTs("../src/components/dashboard.tsx", {
-  "next/link": { default: () => null }, "next/navigation": {},
+  "next/link": () => null, "next/navigation": {},
   "@/lib/supabase/client": { createClient: () => null },
   "@/components/auto-assignment-controls": { AutoAssignmentControls: () => null },
-}, {}, "\nexport { Commissions, WhatsAppScheduleImage }; ");
+}, {}, "\nexport { Commissions, Home, WhatsAppScheduleImage }; ");
 function previewProps(patch = {}) {
   return {
     mass: { mass_date: "2026-10-18", mass_time_id: "t", title: "Misa", status: "published" },
@@ -534,4 +535,77 @@ test("commission list initially renders active commissions and keeps status outs
     assert(html.includes("Title-published")); assert.equal(html.includes("Title-draft"), role !== "LECTOR");
     assert(!html.includes("Title-finished")); assert(!html.includes("Title-cancelled")); assert(html.includes("Confirmada"));
   }
+});
+test("assignment labels list other liturgical services once and preserve multiple-service eligibility", () => {
+  const services = [
+    service("turiferario", { name: "Turiferario" }),
+    service("colecta", { name: "Colecta", required_servers: 4 }),
+    service("segunda", { name: "Segunda Lectura" }),
+    service("clean", { name: "Limpieza", slug: "limpieza-mujeres" }),
+    service("welcome", { name: "Bienvenida", slug: "bienvenida" }),
+  ];
+  const assignments = {
+    turiferario: ["juan"],
+    colecta: ["juan", "juan", "", ""],
+    segunda: [""],
+    clean: ["juan"],
+    welcome: ["juan"],
+  };
+  assert.deepEqual(plain(assignedMassServiceNames(assignments, "segunda", "juan", services)), ["Turiferario", "Colecta"]);
+  assert.deepEqual(plain(assignedMassServiceNames({}, "segunda", "juan", services)), []);
+  assert.equal(canAssignToService(assignments, "segunda", "juan", false, services), false);
+  assert.equal(canAssignToService(assignments, "segunda", "juan", true, services), true);
+});
+
+test("manual edits and autoassignment update rendered option labels from the current draft", () => {
+  const React = require("react");
+  const { renderToStaticMarkup } = require("react-dom/server");
+  const services = [
+    service("turiferario", { name: "Turiferario", category_id: "cat" }),
+    service("segunda", { name: "Segunda Lectura", category_id: "cat" }),
+  ];
+  const renderForm = (assignments) => renderToStaticMarkup(React.createElement(dashboardComponents.Commissions, previewProps({
+    path: "/comisiones/nueva",
+    canEdit: true,
+    query: "",
+    saved: "Cambios pendientes",
+    categories: [{ id: "cat", name: "Servicios" }],
+    services,
+    assignments,
+    peopleFor: () => [{ id: "juan", first_name: "Juan", last_name: "Pérez", display_name: null, state: "Disponible" }],
+  })));
+  assert(renderForm({ turiferario: [""], segunda: [""] }).includes("Juan Pérez - Disponible"));
+  assert(renderForm({ turiferario: ["juan"], segunda: [""] }).includes("Juan Pérez - Asignado a Turiferario"));
+  assert(!renderForm({ turiferario: [""], segunda: [""] }).includes("Asignado a Turiferario"));
+
+  const generated = generateAssignments(input({
+    allowMultipleServices: true,
+    services,
+    people: [person("juan", ["turiferario", "segunda"])],
+  })).assignments;
+  const generatedHtml = renderForm(generated);
+  assert(generatedHtml.includes("Juan Pérez - Asignado a Turiferario"));
+  assert(generatedHtml.includes("Juan Pérez - Asignado a Segunda Lectura"));
+});
+
+test("dashboard server counts use current-parish data and render active and inactive totals", () => {
+  const people = [
+    { parish_id: "p1", active: true },
+    { parish_id: "p1", active: true },
+    { parish_id: "p1", active: false },
+    { parish_id: "p1", active: false },
+    { parish_id: "p2", active: true },
+  ];
+  assert.deepEqual(plain(countPeopleByStatus(people, "p1")), { active: 2, inactive: 2 });
+  const html = require("react-dom/server").renderToStaticMarkup(require("react").createElement(dashboardComponents.Home, {
+    masses: [],
+    people,
+    services: [],
+    massTimes: [],
+    parishId: "p1",
+  }));
+  assert(html.includes("2 activos · 2 inactivos"));
+  assert(!html.includes("3 activos"));
+  const source = readFileSync(new URL("../src/components/dashboard.tsx", import.meta.url), "utf8");
+  assert.match(source, /from\("people"\).*?eq\("parish_id", ownerParishId\)/);
 });

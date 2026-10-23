@@ -22,3 +22,17 @@ export function canAssignToService(
 ): boolean {
   return allowMultipleServices || !isAssignedToAnotherService(assignments, serviceId, personId, services);
 }
+
+export function assignedMassServiceNames(
+  assignments: AssignmentMap,
+  serviceId: string,
+  personId: string,
+  services: RuleService[],
+): string[] {
+  const names = new Set<string>();
+  for (const service of services) {
+    if (service.id === serviceId || !isMassService(service) || !(assignments[service.id] ?? []).includes(personId)) continue;
+    names.add(service.name || service.id);
+  }
+  return [...names];
+}

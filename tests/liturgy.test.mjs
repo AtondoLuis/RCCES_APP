@@ -92,7 +92,7 @@ function formHarness() {
     "next/link": { default: () => null }, "next/navigation": {},
     "@/lib/supabase/client": { createClient: () => null },
     "@/components/auto-assignment-controls": { AutoAssignmentControls: () => null },
-    "@/lib/commission-assignments": { canAssignToService: () => true },
+    "@/lib/commission-assignments": { assignedMassServiceNames: () => [], canAssignToService: () => true },
     "@/lib/commission-preview": { previewAssignmentNames: () => "", repeatedPersonIds: () => new Set() },
   }, {
     window: { setTimeout, clearTimeout },
