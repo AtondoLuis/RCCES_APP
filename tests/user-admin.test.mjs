@@ -112,7 +112,7 @@ test('CSRF origin, invalid JSON and unknown fields fail closed', async () => {
   assert.equal((await h.route.POST(invalid)).status,400);
   assert.equal(h.invitations.length,0);
 });
-for(const role of ['ADMIN','COORDINADOR','LECTOR']) {
+for(const role of ['ADMIN','COORDINADOR','COORDINADOR_LITURGIA','LECTOR']) {
   test(`proxy enforces ADMIN on /admin/usuarios for ${role}`, async () => {
     const h=harness(role); const {NextRequest}=require('next/server');
     const r=await h.load('src/lib/supabase/proxy.ts').updateSession(new NextRequest('https://rcces.example/admin/usuarios'));
@@ -191,4 +191,33 @@ test('admin users page waits for a request before rendering its authentication g
   release();
   await gate;
   assert.equal(authCalls, 1);
+});
+
+for(const status of ['draft','published','finished','cancelled']) {
+  test(`lector direct URL with manipulated query is restricted for ${status}`, async () => {
+    const h=harness('LECTOR');h.records.masses=[{id:uuid(90),parish_id:uuid(10),status}];
+    const {NextRequest}=require('next/server');
+    const response=await h.load('src/lib/supabase/proxy.ts').updateSession(new NextRequest(`https://rcces.example/comisiones/${uuid(90)}/preview?status=published&filter=all`));
+    assert.equal(response.status,status==='published'?200:403);
+  });
+}
+test('liturgy coordinator can open a commission but cannot use user or service administration APIs',async()=>{
+  const h=harness('COORDINADOR_LITURGIA');h.records.masses=[{id:uuid(90),parish_id:uuid(10),status:'draft'}];
+  const {NextRequest}=require('next/server');const proxy=h.load('src/lib/supabase/proxy.ts');
+  for(const path of ['/comisiones','/comisiones/nueva',`/comisiones/${uuid(90)}/editar`]) assert.equal((await proxy.updateSession(new NextRequest('https://rcces.example'+path))).status,200);
+  assert.equal((await h.route.POST(request('POST',body()))).status,403);
+  const services=h.load('src/app/api/admin/servicios/route.ts');
+  assert.equal((await services.PATCH(request('PATCH',{id:uuid(80),required_servers:3}))).status,403);
+});
+test('service API validates required_servers on the server and ADMIN can set three',async()=>{
+  const h=harness();h.records.services=[{id:uuid(80),required_servers:1}];
+  const services=h.load('src/app/api/admin/servicios/route.ts');
+  for(const value of [0,-1,null,1.5]) assert.equal((await services.PATCH(request('PATCH',{id:uuid(80),required_servers:value}))).status,400);
+  assert.equal((await services.PATCH(request('PATCH',{id:uuid(80),required_servers:3}))).status,200);
+  assert.equal(h.records.services[0].required_servers,3);
+});
+test('ADMIN can assign the new role through existing user editing validation',async()=>{
+  const h=harness();const value=body({id:uuid(2),role:'COORDINADOR_LITURGIA'});delete value.email;
+  assert.equal((await h.route.PATCH(request('PATCH',value))).status,200);
+  assert.equal(h.profiles[1].role,'COORDINADOR_LITURGIA');
 });

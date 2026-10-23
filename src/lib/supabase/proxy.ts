@@ -1,7 +1,7 @@
 ﻿import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import { canUseApp, permissionsFor } from "@/lib/permissions";
+import { canUseApp, canAccessPath, canViewCommission } from "@/lib/permissions";
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -35,8 +35,13 @@ export async function updateSession(request: NextRequest) {
       if (request.nextUrl.pathname.startsWith("/api/")) return NextResponse.json({ error: "Tu acceso esta desactivado o no tienes perfil." }, { status: 403 });
       return NextResponse.redirect(new URL("/login?acceso=desactivado", request.url));
     }
-    const adminPath = request.nextUrl.pathname.startsWith("/admin/") || request.nextUrl.pathname.startsWith("/api/admin/");
-    if (adminPath && !permissionsFor(profile!.role).manageConfiguration) return new NextResponse("Acceso denegado. Solo ADMIN.", { status: 403 });
+    if (!canAccessPath(profile!.role, request.nextUrl.pathname)) return new NextResponse("Acceso denegado.", { status: 403 });
+    const commissionId = request.nextUrl.pathname.match(/^\/comisiones\/([^/]+)/)?.[1];
+    if (commissionId && commissionId !== "nueva") {
+      const result = await supabase.from("masses").select("id,status").eq("id", commissionId).eq("parish_id", profile!.parish_id).maybeSingle();
+      if (result.error) return new NextResponse("No se pudo verificar la comision.", { status: 503 });
+      if (!result.data || !canViewCommission(profile!.role, result.data.status)) return new NextResponse("Acceso denegado.", { status: 403 });
+    }
     if (isLogin) return NextResponse.redirect(new URL("/comisiones", request.url));
   }
   return response;

@@ -60,3 +60,18 @@ Configurar `SUPABASE_SERVICE_ROLE_KEY` exclusivamente en el servidor y `APP_URL`
 Solo ADMIN administra usuarios de su propia parroquia. COORDINADOR mantiene comisiones y servidores; LECTOR solo lectura. No se cambia email ni se eliminan cuentas desde esta UI. `active=false` bloquea rutas, APIs y Data API aun con un JWT vigente; no se borra ni se banea la cuenta de Auth. RLS y un trigger serializado por parroquia impiden quitar el ultimo ADMIN activo. Se conservan las asignaciones y el historial.
 
 El estado de invitacion se obtiene de Auth (`invited_at`, sin confirmacion ni ultimo acceso); no se infiere de la fecha del perfil. Sin clave administrativa el listado y la edicion de perfiles siguen disponibles, pero invitaciones/ultimo acceso no. Si el envio de email tiene exito y la preparacion del perfil falla, la API lo informa explicitamente y la cuenta queda sin acceso hasta reparar el perfil; no se elimina la cuenta de Auth como compensacion. No se agrego infraestructura de auditoria porque el proyecto no tenia una.
+
+
+### Coordinacion liturgica, visibilidad y plazas
+
+Aplicar en orden las migraciones nuevas `20261023200248_add_liturgy_coordinator_role.sql` y `20261023200253_commission_visibility_and_service_slots.sql` antes de desplegar este codigo. La primera confirma el valor ENUM en una transaccion separada. No reaplicar ni editar migraciones anteriores.
+
+`COORDINADOR_LITURGIA` consulta datos de su parroquia, crea/edita comisiones preparables, asigna manualmente o con el boton automatico, confirma y genera preview/PNG. No administra usuarios, servidores ni catalogos/configuracion, y no modifica ni reabre Realizadas. ADMIN y COORDINADOR conservan sus permisos. Los checks de rutas/API se centralizan en `permissions.ts`; el RPC usa `can_manage_commissions()` sin ampliar `is_staff()`. RLS impide escrituras de catalogos/personas/perfiles al nuevo rol y bloquea asignaciones con personas de otra parroquia.
+
+LECTOR solo obtiene Confirmadas (`published`) mediante consultas, URLs, RLS y datos asociados. Los filtros nunca amplian ese permiso. Servidores abre con Activos y permite Inactivos/Todos junto con busqueda. Comisiones abre con Activas (Borrador + Confirmada) y permite filtrar cada estado o Todas segun permisos.
+
+`services.required_servers` es integer obligatorio >= 1, default 1. La migracion inicializa Colecta=4 y Ofrenda=2 por identidad estable. Los demas servicios normales quedan en 1. El numero es editable por ADMIN y se valida en UI, API y DB; los servicios de misa utilizan exactamente esas plazas tanto manualmente como en autoasignacion, sin cantidades por nombre en runtime. Si faltan candidatos quedan plazas vacias con aviso.
+
+Bienvenida ignora la cantidad y sigue usando Todos sin asignacion individual. Limpieza conserva el numero de plazas existente e independiente (incluido Agregar cuando permite multiples); no usa required_servers. Conserva motor, almacenamiento e historial propios y el mismo boton ejecuta ambos motores. Esta decision evita cambiar la cantidad de limpiezas existentes. El indicador * solo cuenta servicios reales de misa.
+
+El estado permanece en listas y controles del workflow, pero se retiro del nodo del preview que captura PNG. Branding y textos incidentales permanecen intactos. El AdminGate de usuarios conserva connection() dentro de Suspense para Next.js 16.

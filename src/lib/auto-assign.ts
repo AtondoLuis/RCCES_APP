@@ -17,6 +17,7 @@ export type AssignmentService = {
   active: boolean;
   display_order: number;
   allow_multiple_people: boolean;
+  required_servers?: number;
   parish_id?: string;
 };
 

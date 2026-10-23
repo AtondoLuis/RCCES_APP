@@ -63,7 +63,7 @@ export function AutoAssignmentControls(props: Props) {
       setWarning([
         ...input.services.filter((service) => service.active && isMassService(service)).map((service) => {
           const missing = getRequiredAssignmentCount(service, props.assignments[service.id]?.length) - (result.assignments[service.id] ?? []).filter(Boolean).length;
-          return missing > 0 ? `Faltan ${missing} servidores para ${service.name}.` : "";
+          return missing > 0 ? `Faltan ${missing} servidores para completar ${service.name}.` : "";
         }),
         cleaning.missingCount ? `Faltan ${cleaning.missingCount} personas para Limpieza.` : "",
         result.reusedPersonIds.length ? "Fue necesario reutilizar servidores por falta de candidatos suficientes." : "",

@@ -1,8 +1,9 @@
 import "server-only";
 import { z } from "zod";
+import { APP_ROLES } from "@/lib/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AccessError, type requireAdmin } from "@/lib/admin-access";
-const fields = { full_name: z.string().trim().min(1).max(150), role: z.enum(["ADMIN", "COORDINADOR", "LECTOR"]),
+const fields = { full_name: z.string().trim().min(1).max(150), role: z.enum(APP_ROLES),
   active: z.boolean(), person_id: z.string().uuid().nullable() };
 const inviteSchema = z.object({ ...fields, email: z.string().trim().email().max(254).transform((s) => s.toLowerCase()) }).strict();
 const updateSchema = z.object({ ...fields, id: z.string().uuid() }).strict();

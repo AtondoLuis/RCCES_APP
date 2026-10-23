@@ -1,3 +1,4 @@
+import { permissionsFor } from "./permissions";
 export const COMMISSION_STATUSES = {
   draft: "Borrador", published: "Confirmada", finished: "Realizada", cancelled: "Cancelada",
 } as const;
@@ -8,6 +9,6 @@ export function statusLabel(status?: string | null): string {
 export function countsForRotation(status?: string | null): boolean {
   return status === "published" || status === "finished";
 }
-export function statusTransitions(status: string): string[] {
-  return ({ draft: ["published"], published: ["finished", "draft", "cancelled"], finished: ["draft"], cancelled: ["draft"] } as Record<string, string[]>)[status] ?? ["draft"];
+export function statusTransitions(status: string, role = "ADMIN"): string[] {
+  return ({ draft: ["published"], published: ["finished", "draft", "cancelled"], finished: ["draft"], cancelled: ["draft"] } as Record<string, string[]>)[status]?.filter((next) => permissionsFor(role).editCommissions && (permissionsFor(role).reopenCompleted || (status !== "finished" && next !== "finished"))) ?? [];
 }
