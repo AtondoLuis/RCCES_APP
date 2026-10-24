@@ -160,9 +160,9 @@ export default function Dashboard() {
     await exportPng(true); window.open(`https://wa.me/?text=${encodeURIComponent(`${text}\nAdjunta la imagen PNG descargada.`)}`, "_blank");
   }
 
-  if (loading) return <Shell role={role}><State text="Cargando..." /></Shell>;
-  if (error) return <Shell role={role}><State text={`Error al cargar: ${error}`} /></Shell>;
-  return <Shell role={role} onLogout={async () => { await supabase?.auth.signOut(); router.push("/login"); }}>
+  if (loading) return <Shell role={role} patronImageUrl={parish.patron_image_url}><State text="Cargando..." /></Shell>;
+  if (error) return <Shell role={role} patronImageUrl={parish.patron_image_url}><State text={`Error al cargar: ${error}`} /></Shell>;
+  return <Shell role={role} patronImageUrl={parish.patron_image_url} onLogout={async () => { await supabase?.auth.signOut(); router.push("/login"); }}>
     {pathname === "/" && <Home masses={masses.filter((m) => canViewCommission(role, m.status))} people={people} services={services} massTimes={massTimes} parishId={parish.id} />}
     {pathname.startsWith("/comisiones") && <Commissions role={role} path={pathname} masses={masses} mass={mass} setMass={setMass} massTimes={massTimes} services={services} categories={categories} assignments={assignments} setAssignments={setAssignments} peopleFor={peopleFor} personName={(id) => label(people.find((p) => p.id === id))} query={query} setQuery={setQuery} canEdit={canEditCurrent && (!["published", "finished"].includes(originalStatus) || editingUnlocked)} canManage={canEditCurrent} onUnlock={() => { if (originalStatus !== "published" || window.confirm("Esta comisión ya está confirmada. ¿Deseas modificarla?")) setEditingUnlocked(true); }} onStatusChange={(status) => { if (window.confirm(`¿Cambiar la comisión a ${statusLabel(status)}? Se guardarán los cambios actuales.`)) void saveMass(status); }} saved={saved} onSave={() => void saveMass()} onDuplicate={() => { setMass({ ...mass, id: undefined, mass_date: "2026-10-13" }); router.push("/comisiones/nueva"); }} onChange={changeAssignment} onVisibilityChange={changeVisibility} previewRef={previewRef} parish={parish} settings={settings} onDownload={() => void exportPng(true)} onShare={() => void shareImage()} assignmentTools={canEditCurrent && (!["published", "finished"].includes(originalStatus) || editingUnlocked) && mass.parish_id === parish.id ? <AutoAssignmentControls key={`${mass.id ?? "new"}:${mass.mass_date}:${mass.mass_time_id}`} parishId={parish.id} massId={mass.id} date={mass.mass_date} massTimeId={mass.mass_time_id} time={massTimes.find((time) => time.id === mass.mass_time_id)?.time ?? ""} people={people} services={services} categories={categories} assignments={assignments} allowMultipleServices={settings.allow_multiple_services} onGenerated={(next) => { setAssignments(next); setSaved("Cambios pendientes"); setQuery(""); }}/> : null} />}
     {pathname.startsWith("/servidores") && <PeopleView parishId={parish.id} canEdit={permissionsFor(role).editPeople} personId={personId} people={people} services={services} categories={categories} reload={loadAll} />}
@@ -173,10 +173,26 @@ export default function Dashboard() {
   </Shell>;
 }
 
-export function Shell({ children, role, onLogout }: { children: React.ReactNode; role: Role; onLogout?: () => void }) {
+export function Shell({ children, role, patronImageUrl, onLogout }: { children: React.ReactNode; role: Role; patronImageUrl?: string | null; onLogout?: () => void }) {
   const currentPath = usePathname() || "/";
   const nav = [["/comisiones", "Comisiones"], ["/servidores", "Servidores"], ["/admin/servicios", "Servicios"], ["/admin/horarios", "Horarios"], ["/admin/parroquia", "Parroquia"], ["/admin/configuracion", "Configuración"], ["/admin/usuarios", "Usuarios"]].filter(([href]) => canAccessPath(role, href));
-  return <div className="min-h-screen bg-[#f7f8fa] text-slate-900"><header className="sticky top-0 z-20 border-b border-slate-200 bg-white"><div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-2 px-4 py-2 sm:px-8"><Link href="/" className="font-serif text-xl font-bold text-[#13263d]">Santo Toribio Romo</Link><nav className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-600">{nav.map(([href, name]) => <Link key={href} href={href} className={`nav-link ${currentPath === href || currentPath.startsWith(`${href}/`) ? "nav-link-active" : ""}`}>{name}</Link>)}<span className="status-pill">{role}</span>{onLogout && <button onClick={onLogout} className="border border-slate-300 bg-white text-slate-700 hover:border-[#13263d] hover:text-[#13263d]" aria-label="Salir"><LogOut size={17}/></button>}</nav></div></header><main className="mx-auto max-w-[1440px] px-4 py-7 sm:px-8">{children}</main></div>;
+  return <div className="min-h-screen bg-[#f7f8fa] text-slate-900"><header className="sticky top-0 z-20 border-b border-slate-200 bg-white"><div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-2 px-4 py-2 sm:px-8"><Link href="/" className="inline-flex max-w-full min-w-0 items-center gap-2 font-serif text-xl font-bold text-[#13263d]"><HeaderPatronImage key={patronImageUrl ?? ""} src={patronImageUrl}/><span>Santo Toribio Romo</span></Link><nav className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-600">{nav.map(([href, name]) => <Link key={href} href={href} className={`nav-link ${currentPath === href || currentPath.startsWith(`${href}/`) ? "nav-link-active" : ""}`}>{name}</Link>)}<span className="status-pill">{role}</span>{onLogout && <button onClick={onLogout} className="border border-slate-300 bg-white text-slate-700 hover:border-[#13263d] hover:text-[#13263d]" aria-label="Salir"><LogOut size={17}/></button>}</nav></div></header><main className="mx-auto max-w-[1440px] px-4 py-7 sm:px-8">{children}</main></div>;
+}
+function HeaderPatronImage({ src }: { src?: string | null }) {
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const imageRef = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    const image = imageRef.current;
+    if (image?.complete) {
+      if (image.naturalWidth > 0) setLoaded(true);
+      else setFailed(true);
+    }
+  }, [src]);
+  if (!src || failed) return null;
+  // Parish image URLs are configurable, as in the existing commission preview.
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img ref={imageRef} src={src} alt="Santo Patrono" width={36} height={36} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} className={`${loaded ? "" : "hidden"} h-7 w-7 shrink-0 object-contain sm:h-9 sm:w-9`}/>;
 }
 function State({ text }: { text: string }) { return <div className="card-panel p-6 text-slate-600">{text}</div>; }
 function formatDate(date: string) { return new Intl.DateTimeFormat("es-MX", { day: "numeric", month: "long", year: "numeric" }).format(new Date(`${date}T12:00:00`)); }
