@@ -71,5 +71,19 @@ test("SQL migrations: configurable slots, liturgy-only writes, confirmed-only le
     await db.query("update services set required_servers=3 where id=$1",[id(502)]);
     assert.equal((await db.query("select required_servers from services where id=$1",[id(502)])).rows[0].required_servers,3);
     await assert.rejects(db.query("update profiles set active=false where id=$1",[id(1)]),/ADMIN activo/);
+    assert.equal((await db.query("select class_id from people where id=$1",[id(200)])).rows[0].class_id,null);
+    const assignmentCount = (await db.query("select * from mass_assignments where person_id=$1",[id(200)])).rows.length;
+    await db.query("update people set class_id=$1 where id=$2 and parish_id=$3",["crecimiento-jovenes-1",id(200),id(100)]);
+    assert.equal((await db.query("select class_id from people where id=$1",[id(200)])).rows[0].class_id,"crecimiento-jovenes-1");
+    assert.equal((await db.query("select * from mass_assignments where person_id=$1",[id(200)])).rows.length,assignmentCount);
+    await assert.rejects(db.query("update people set class_id='unknown' where id=$1",[id(200)]));
+    await db.query("insert into people(id,parish_id,first_name,class_id) values($1,$2,'With class',$3)",[id(203),id(100),"crecimiento-5"]);
+    await db.query("insert into people(id,parish_id,first_name) values($1,$2,'Without class')",[id(204),id(100)]);
+    assert.equal((await db.query("select class_id from people where id=$1",[id(204)])).rows[0].class_id,null);
+    await asUser(5);
+    assert.equal((await db.query("select * from people where id=$1",[id(200)])).rows.length,0);
+    assert.equal((await db.query("update people set class_id='crecimiento-4' where id=$1 returning id",[id(200)])).rows.length,0);
+    await asUser(1);
+    assert.equal((await db.query("select class_id from people where id=$1",[id(200)])).rows[0].class_id,"crecimiento-jovenes-1");
   } finally { await db.close(); }
 });

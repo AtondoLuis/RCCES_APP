@@ -17,10 +17,11 @@ import { statusLabel, statusTransitions } from "@/lib/commission-status";
 
 import { permissionsFor, canViewCommission, canAccessPath, type AppRole } from "@/lib/permissions";
 import { matchesPeopleFilter, matchesCommissionFilter, type PeopleStatusFilter } from "@/lib/list-filters";
+import { SERVER_CLASSES, serverClassLabel, type ServerClassFilter, type ServerClassId } from "@/lib/server-classes";
 type Role = AppRole;
 type Category = { id: string; name: string; display_order: number };
 type Service = { id: string; stable_key: string | null; slug: string | null; category_id: string; name: string; allow_multiple_people: boolean; required_servers: number; active: boolean; display_order: number };
-type Person = { id: string; parish_id: string; first_name: string; last_name: string; display_name: string | null; phone: string | null; whatsapp: string | null; email: string | null; gender: string | null; active: boolean; notes: string | null; services: string[] };
+type Person = { id: string; parish_id: string; first_name: string; last_name: string; display_name: string | null; phone: string | null; whatsapp: string | null; email: string | null; gender: string | null; active: boolean; notes: string | null; class_id: ServerClassId | null; services: string[] };
 type MassTime = { id: string; name: string; time: string; active: boolean; display_order: number };
 type Parish = { id: string; name: string; logo_url: string | null; patron_image_url: string | null; address: string | null; phone: string | null };
 type SettingsRow = { women_clothing: string | null; men_clothing: string | null; general_clothing: string | null; default_notes: string | null; allow_multiple_services: boolean };
@@ -181,7 +182,27 @@ function State({ text }: { text: string }) { return <div className="card-panel p
 function formatDate(date: string) { return new Intl.DateTimeFormat("es-MX", { day: "numeric", month: "long", year: "numeric" }).format(new Date(`${date}T12:00:00`)); }
 function timeName(times: MassTime[], id: string) { return times.find((t) => t.id === id)?.name ?? "Sin hora"; }
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block"><span className="mb-1 block text-sm font-bold text-slate-700">{label}</span>{children}</label>; }
-function Home({ masses, people, services, massTimes, parishId }: { masses: Mass[]; people: Person[]; services: Service[]; massTimes: MassTime[]; parishId: string }) { const peopleCounts = countPeopleByStatus(people, parishId); return <><div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm font-bold uppercase tracking-wide text-[#b18b4a]">Panel de coordinación</p><h1 className="text-3xl font-bold text-[#13263d]">Comisiones para la Santa Misa</h1></div><Link className="button-link primary bg-[#13263d] text-sm text-white hover:bg-[#1d3a5b]" href="/comisiones/nueva"><Plus size={17}/> Nueva comisión</Link></div><div className="grid gap-4 md:grid-cols-3"><Stat label="Comisiones" value={String(masses.length)} icon={<CalendarDays/>}/><Stat label="Servidores" value={`${peopleCounts.active} activos · ${peopleCounts.inactive} inactivos`} icon={<Users/>}/><Stat label="Servicios" value={String(services.length)} icon={<Settings/>}/></div><section className="mt-7 rounded-lg border bg-white p-5"><h2 className="mb-4 text-lg font-bold">Próximas comisiones</h2>{masses.length ? masses.map((m) => <Link key={m.id} href={`/comisiones/${m.id}`} className="flex justify-between border-t py-3 text-sm"><span>{m.title}</span><span>{formatDate(m.mass_date)} · {timeName(massTimes, m.mass_time_id)}</span></Link>) : <State text="No hay datos" />}</section></>; }
+function Home({ masses, people, services, massTimes, parishId }: { masses: Mass[]; people: Person[]; services: Service[]; massTimes: MassTime[]; parishId: string }) {
+  const peopleCounts = countPeopleByStatus(people, parishId);
+  const groups = [
+    { title: "Próximas comisiones", entries: masses.filter((mass) => mass.status === "draft" || mass.status === "published"), empty: "No hay próximas comisiones." },
+    { title: "Realizadas", entries: masses.filter((mass) => mass.status === "finished"), empty: "No hay comisiones realizadas." },
+    { title: "Canceladas", entries: masses.filter((mass) => mass.status === "cancelled"), empty: "No hay comisiones canceladas." },
+  ];
+  return <>
+    <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
+      <div><p className="text-sm font-bold uppercase tracking-wide text-[#b18b4a]">Panel de coordinación</p><h1 className="text-3xl font-bold text-[#13263d]">Comisiones para la Santa Misa</h1></div>
+      <Link className="button-link primary bg-[#13263d] text-sm text-white hover:bg-[#1d3a5b]" href="/comisiones/nueva"><Plus size={17}/> Nueva comisión</Link>
+    </div>
+    <div className="grid gap-4 md:grid-cols-3"><Stat label="Comisiones" value={String(masses.length)} icon={<CalendarDays/>}/><Stat label="Servidores" value={`${peopleCounts.active} activos · ${peopleCounts.inactive} inactivos`} icon={<Users/>}/><Stat label="Servicios" value={String(services.length)} icon={<Settings/>}/></div>
+    {groups.map((group) => <section key={group.title} className="mt-7 rounded-lg border bg-white p-5">
+      <h2 className="mb-4 text-lg font-bold">{group.title}</h2>
+      {group.entries.length ? group.entries.map((mass) => <Link key={mass.id} href={`/comisiones/${mass.id}`} className="flex flex-wrap items-center justify-between gap-2 border-t py-3 text-sm hover:text-[#13263d]">
+        <span className="font-semibold">{mass.title}</span><span>{formatDate(mass.mass_date)} · {timeName(massTimes, mass.mass_time_id)}</span>
+      </Link>) : <p className="text-sm text-slate-500">{group.empty}</p>}
+    </section>)}
+  </>;
+}
 function Stat({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) { return <div className="flex items-center gap-4 rounded-lg border bg-white p-5"><span className="text-[#13263d]">{icon}</span><div><p className="text-xs uppercase text-slate-500">{label}</p><p className="text-2xl font-black text-[#13263d]">{value}</p></div></div>; }
 
 function Commissions(props: { role?: string; path: string; masses: Mass[]; mass: Mass; setMass: React.Dispatch<React.SetStateAction<Mass>>; massTimes: MassTime[]; services: Service[]; categories: Category[]; assignments: AssignmentMap; setAssignments: (a: AssignmentMap) => void; peopleFor: (s: Service) => Array<Person & { state: string }>; personName: (id: string) => string; query: string; setQuery: (q: string) => void; canEdit: boolean; canManage?: boolean; onUnlock?: () => void; onStatusChange?: (status: string) => void; saved: string; onSave: () => void; onDuplicate: () => void; onChange: (s: Service, i: number, p: string) => void; onVisibilityChange?: (kind: "category" | "service", id: string) => void; previewRef: React.RefObject<HTMLDivElement | null>; parish: Parish; settings: SettingsRow; onDownload: () => void; onShare: () => void; assignmentTools?: React.ReactNode }) {
@@ -269,23 +290,57 @@ function PeopleView({ parishId, canEdit, personId, people, services, categories,
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState<PeopleStatusFilter>("active");
-  const editing = personId && personId !== "nuevo" ? people.find((p) => p.id === personId) : null;
-  const [form, setForm] = useState<Person>(editing ?? { id: "", parish_id: parishId, first_name: "", last_name: "", display_name: "", phone: "", whatsapp: "", email: "", gender: "female", active: true, notes: "", services: [] });
+  const [classFilter, setClassFilter] = useState<ServerClassFilter>("all");
+  const editing = personId && personId !== "nuevo" ? people.find((person) => person.id === personId) : null;
+  const [form, setForm] = useState<Person>(editing ?? { id: "", parish_id: parishId, first_name: "", last_name: "", display_name: "", phone: "", whatsapp: "", email: "", gender: "female", active: true, notes: "", class_id: null, services: [] });
   useEffect(() => { if (editing) window.setTimeout(() => setForm(editing), 0); }, [editing]);
+
   async function save() {
     if (!supabase || !canEdit) return;
-    const row = { parish_id: parishId, first_name: form.first_name, last_name: form.last_name, display_name: form.display_name, phone: form.phone, whatsapp: form.whatsapp, email: form.email, gender: form.gender, active: form.active, notes: form.notes };
-    const { data, error } = form.id ? await supabase.from("people").update(row).eq("id", form.id).select("id").single() : await supabase.from("people").insert(row).select("id").single();
-    if (error || !data) { alert(error?.message); return; }
+    const row = { parish_id: parishId, first_name: form.first_name, last_name: form.last_name, display_name: form.display_name, phone: form.phone, whatsapp: form.whatsapp, email: form.email, gender: form.gender, active: form.active, notes: form.notes, class_id: form.class_id };
+    const { data, error } = form.id
+      ? await supabase.from("people").update(row).eq("id", form.id).eq("parish_id", parishId).select("id").single()
+      : await supabase.from("people").insert(row).select("id").single();
+    if (error || !data) { alert(error?.message || "No se pudo guardar el servidor."); return; }
     await supabase.from("person_services").delete().eq("person_id", data.id);
     if (form.services.length) await supabase.from("person_services").insert(form.services.map((service_id) => ({ person_id: data.id, service_id })));
-    await reload(); router.push(`/servidores/${data.id}`);
+    await reload();
+    router.push(`/servidores/${data.id}`);
   }
+
   if (!personId) {
-    const filtered = people.filter((p) => matchesPeopleFilter(p, search, stateFilter));
-    return <><div className="mb-5 flex flex-wrap justify-between gap-3"><h1 className="text-2xl font-bold">Servidores</h1>{canEdit && <Link className="button-link primary bg-[#13263d] text-sm text-white hover:bg-[#1d3a5b]" href="/servidores/nuevo"><Plus size={17}/> Nuevo servidor</Link>}</div><input className="mb-4 w-full rounded-lg border bg-white px-3 py-2" placeholder="Buscar servidor" value={search} onChange={(e) => setSearch(e.target.value)} /><label className="mb-4 block text-sm font-bold">Estado<select aria-label="Estado de servidores" value={stateFilter} onChange={(e) => setStateFilter(e.target.value as PeopleStatusFilter)}><option value="active">Activos</option><option value="inactive">Inactivos</option><option value="all">Todos</option></select></label>{filtered.map((p) => <Link key={p.id} href={`/servidores/${p.id}`} className="mb-3 block card-panel p-4 transition hover:border-[#13263d] hover:shadow-md"><b>{p.display_name || `${p.first_name} ${p.last_name}`}</b><p className="text-sm text-slate-500">{p.email || "Sin email"} · {p.active ? "Activo" : "Inactivo"}</p></Link>)}</>;
+    const filtered = people.filter((person) => matchesPeopleFilter(person, search, stateFilter, classFilter));
+    return <>
+      <div className="mb-5 flex flex-wrap justify-between gap-3"><h1 className="text-2xl font-bold">Servidores</h1>{canEdit && <Link className="button-link primary bg-[#13263d] text-sm text-white hover:bg-[#1d3a5b]" href="/servidores/nuevo"><Plus size={17}/> Nuevo servidor</Link>}</div>
+      <div className="mb-4 grid gap-3 rounded-lg border bg-white p-4 sm:grid-cols-3">
+        <label className="text-sm font-bold">Buscar servidor<input className="mt-1 w-full" placeholder="Nombre o email" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+        <label className="text-sm font-bold">Estado<select aria-label="Estado de servidores" className="mt-1 w-full" value={stateFilter} onChange={(event) => setStateFilter(event.target.value as PeopleStatusFilter)}><option value="active">Activos</option><option value="inactive">Inactivos</option><option value="all">Todos</option></select></label>
+        <label className="text-sm font-bold">Clase<select aria-label="Filtrar por clase" className="mt-1 w-full" value={classFilter} onChange={(event) => setClassFilter(event.target.value as ServerClassFilter)}><option value="all">Todas las clases</option>{SERVER_CLASSES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}<option value="unassigned">Sin asignar</option></select></label>
+      </div>
+      {filtered.length ? filtered.map((person) => <Link key={person.id} href={`/servidores/${person.id}`} className="mb-3 block card-panel p-4 transition hover:border-[#13263d] hover:shadow-md">
+        <b className="break-words">{person.display_name || `${person.first_name} ${person.last_name}`}</b>
+        <p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-sm text-slate-600"><span className="break-all">{person.email || "Sin email"}</span><span>· {person.active ? "Activo" : "Inactivo"}</span><span className="font-semibold">· Clase: {serverClassLabel(person.class_id)}</span></p>
+      </Link>) : <p role="status" className="card-panel p-4 text-sm text-slate-600">No hay servidores que coincidan con los filtros.</p>}
+    </>;
   }
-  return <section className="card-panel p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h1 className="text-2xl font-bold">{personId === "nuevo" ? "Crear servidor" : "Servidor"}</h1>{editing && canEdit && <Link className="button-link border border-slate-300 bg-white text-sm text-slate-700 hover:border-[#13263d] hover:text-[#13263d]" href={`/servidores/${editing.id}/editar`}>Editar</Link>}</div><div className="grid gap-4 sm:grid-cols-2"><Field label="Nombre"><input disabled={!canEdit} value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })}/></Field><Field label="Apellidos"><input disabled={!canEdit} value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })}/></Field><Field label="Nombre para mostrar"><input disabled={!canEdit} value={form.display_name ?? ""} onChange={(e) => setForm({ ...form, display_name: e.target.value })}/></Field><Field label="Teléfono"><input disabled={!canEdit} value={form.phone ?? ""} onChange={(e) => setForm({ ...form, phone: e.target.value })}/></Field><Field label="WhatsApp"><input disabled={!canEdit} value={form.whatsapp ?? ""} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })}/></Field><Field label="Email"><input disabled={!canEdit} value={form.email ?? ""} onChange={(e) => setForm({ ...form, email: e.target.value })}/></Field><Field label="Sexo"><select disabled={!canEdit} value={form.gender ?? ""} onChange={(e) => setForm({ ...form, gender: e.target.value })}><option value="female">Mujer</option><option value="male">Hombre</option><option value="other">Otro</option></select></Field></div><label className="checkbox-field mt-4 text-sm"><input disabled={!canEdit} type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })}/><span>Activo</span></label><Field label="Notas"><textarea disabled={!canEdit} rows={3} value={form.notes ?? ""} onChange={(e) => setForm({ ...form, notes: e.target.value })}/></Field><h2 className="mt-5 font-bold">Servicios autorizados</h2>{categories.map((c) => <div key={c.id} className="mt-3"><p className="text-xs font-black uppercase text-[#b18b4a]">{c.name}</p><div className="service-options">{services.filter((s) => s.category_id === c.id).map((s) => <label key={s.id} className="checkbox-field text-sm"><input disabled={!canEdit} type="checkbox" checked={form.services.includes(s.id)} onChange={(e) => setForm({ ...form, services: e.target.checked ? [...form.services, s.id] : form.services.filter((id) => id !== s.id) })}/><span>{s.name}</span></label>)}</div></div>)}{canEdit && <button onClick={save} className="mt-5 min-h-11 rounded-lg primary bg-[#13263d] px-4 py-2 text-sm font-bold text-white">Guardar</button>}</section>;
+  return <section className="card-panel p-5">
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h1 className="text-2xl font-bold">{personId === "nuevo" ? "Crear servidor" : "Servidor"}</h1>{editing && canEdit && <Link className="button-link border border-slate-300 bg-white text-sm text-slate-700 hover:border-[#13263d] hover:text-[#13263d]" href={`/servidores/${editing.id}/editar`}>Editar</Link>}</div>
+    <div className="grid gap-4 sm:grid-cols-2">
+      <Field label="Nombre"><input disabled={!canEdit} value={form.first_name} onChange={(event) => setForm({ ...form, first_name: event.target.value })}/></Field>
+      <Field label="Apellidos"><input disabled={!canEdit} value={form.last_name} onChange={(event) => setForm({ ...form, last_name: event.target.value })}/></Field>
+      <Field label="Nombre para mostrar"><input disabled={!canEdit} value={form.display_name ?? ""} onChange={(event) => setForm({ ...form, display_name: event.target.value })}/></Field>
+      <Field label="Teléfono"><input disabled={!canEdit} value={form.phone ?? ""} onChange={(event) => setForm({ ...form, phone: event.target.value })}/></Field>
+      <Field label="WhatsApp"><input disabled={!canEdit} value={form.whatsapp ?? ""} onChange={(event) => setForm({ ...form, whatsapp: event.target.value })}/></Field>
+      <Field label="Email"><input disabled={!canEdit} value={form.email ?? ""} onChange={(event) => setForm({ ...form, email: event.target.value })}/></Field>
+      <Field label="Sexo"><select disabled={!canEdit} value={form.gender ?? ""} onChange={(event) => setForm({ ...form, gender: event.target.value })}><option value="female">Mujer</option><option value="male">Hombre</option><option value="other">Otro</option></select></Field>
+      <Field label="Clase"><select aria-label="Clase del servidor" disabled={!canEdit} value={form.class_id ?? ""} onChange={(event) => setForm({ ...form, class_id: (event.target.value || null) as ServerClassId | null })}><option value="">Sin asignar</option>{SERVER_CLASSES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></Field>
+    </div>
+    <label className="checkbox-field mt-4 text-sm"><input disabled={!canEdit} type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })}/><span>Activo</span></label>
+    <Field label="Notas"><textarea disabled={!canEdit} rows={3} value={form.notes ?? ""} onChange={(event) => setForm({ ...form, notes: event.target.value })}/></Field>
+    <h2 className="mt-5 font-bold">Servicios autorizados</h2>
+    {categories.map((category) => <div key={category.id} className="mt-3"><p className="text-xs font-black uppercase text-[#b18b4a]">{category.name}</p><div className="service-options">{services.filter((service) => service.category_id === category.id).map((service) => <label key={service.id} className="checkbox-field text-sm"><input disabled={!canEdit} type="checkbox" checked={form.services.includes(service.id)} onChange={(event) => setForm({ ...form, services: event.target.checked ? [...form.services, service.id] : form.services.filter((id) => id !== service.id) })}/><span>{service.name}</span></label>)}</div></div>)}
+    {canEdit && <button onClick={save} className="mt-5 min-h-11 rounded-lg primary bg-[#13263d] px-4 py-2 text-sm font-bold text-white">Guardar</button>}
+  </section>;
 }
 function ServicesAdmin({ canAdmin, categories, services, reload }: { canAdmin: boolean; categories: Category[]; services: Service[]; reload: () => Promise<void> }) {
   const supabase = createClient();

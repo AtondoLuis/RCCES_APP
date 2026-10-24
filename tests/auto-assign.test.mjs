@@ -517,7 +517,7 @@ const listComponents = loadTs("../src/components/dashboard.tsx", {
   "next/navigation": { useRouter: () => ({ push: () => {} }) },
   "@/lib/supabase/client": { createClient: () => null },
   "@/components/auto-assignment-controls": { AutoAssignmentControls: () => null },
-}, {}, "\nexport { PeopleView, Commissions }; ");
+}, {}, "\nexport { PeopleView, Commissions, Home }; ");
 test("server list renders an active-only initial view with a responsive status select", () => {
   const html = require("react-dom/server").renderToStaticMarkup(ReactForLists.createElement(listComponents.PeopleView, {
     canEdit: false, categories: [], services: [], reload: () => {}, people: [
@@ -693,4 +693,96 @@ test("section rotation ignores cleaning history outside the selected section", (
   const first = generateCommissionAssignments(base, "word").assignments.reading[0];
   const withCleaning = { ...base, history: [{ mass_id: "old", person_id: first, service_id: "clean" }] };
   assert.equal(generateCommissionAssignments(withCleaning, "word").assignments.reading[0], first);
+});
+
+test("class filter covers all four classes, unassigned servers, and name search", () => {
+  const ids = ["crecimiento-jovenes-1", "crecimiento-jovenes-2", "crecimiento-5", "crecimiento-4"];
+  const people = ids.map((class_id, index) => ({ first_name: `Persona${index}`, last_name: "Clase", active: true, class_id }));
+  people.push({ first_name: "Ana", last_name: "Libre", active: true, class_id: null });
+  for (const [index, id] of ids.entries()) {
+    assert.deepEqual(people.filter((person) => filters.matchesPeopleFilter(person, "", "active", id)).map((person) => person.first_name), [`Persona${index}`]);
+  }
+  assert.deepEqual(people.filter((person) => filters.matchesPeopleFilter(person, "", "active", "unassigned")).map((person) => person.first_name), ["Ana"]);
+  assert.equal(people.filter((person) => filters.matchesPeopleFilter(person, "Ana", "active", "crecimiento-4")).length, 0);
+  assert.equal(people.filter((person) => filters.matchesPeopleFilter(person, "Ana", "active", "unassigned")).length, 1);
+});
+
+test("server list and form expose compact class labels and the saved selection", () => {
+  const render = (props) => require("react-dom/server").renderToStaticMarkup(ReactForLists.createElement(listComponents.PeopleView, props));
+  const person = { id: "server-1", parish_id: "p1", first_name: "Ana", last_name: "Castelo", active: true, class_id: "crecimiento-jovenes-2", services: [] };
+  const base = { parishId: "p1", canEdit: true, categories: [], services: [], reload: () => {}, people: [person] };
+  const list = render(base);
+  assert(list.includes("Clase: Crecimiento Jóvenes 2"));
+  assert(list.includes('aria-label="Filtrar por clase"'));
+  assert(list.includes("Todas las clases") && list.includes("Sin asignar"));
+  assert(!list.includes("overflow-x-auto"));
+  const existing = render({ ...base, personId: "server-1" });
+  assert.match(existing, /aria-label="Clase del servidor"[^>]*><option value="">Sin asignar<\/option><option value="crecimiento-jovenes-1"/);
+  assert.match(existing, /value="crecimiento-jovenes-2" selected/);
+  const fresh = render({ ...base, personId: "nuevo" });
+  assert.match(fresh, /aria-label="Clase del servidor"[^>]*><option value="" selected="">Sin asignar/);
+});
+
+test("dashboard separates upcoming, completed, and cancelled commissions", () => {
+  const html = require("react-dom/server").renderToStaticMarkup(ReactForLists.createElement(listComponents.Home, {
+    masses: ["draft", "published", "finished", "cancelled"].map((status) => ({ id: status, title: `Mass-${status}`, status, mass_date: "2026-10-18", mass_time_id: "t" })),
+    people: [], services: [], massTimes: [], parishId: "p1",
+  }));
+  for (const title of ["Próximas comisiones", "Realizadas", "Canceladas"]) assert(html.includes(title));
+  const upcoming = html.indexOf("Próximas comisiones");
+  const completed = html.indexOf("Realizadas");
+  const cancelled = html.indexOf("Canceladas");
+  assert(upcoming < html.indexOf("Mass-draft") && html.indexOf("Mass-published") < completed);
+  assert(completed < html.indexOf("Mass-finished") && html.indexOf("Mass-finished") < cancelled);
+  assert(cancelled < html.indexOf("Mass-cancelled"));
+});
+
+test("server form creates with a class and edits it without changing the server identity", async () => {
+  const React = require("react");
+  function exercise(personId, people, selectedClass) {
+    const writes = [];
+    const hooks = [];
+    let index = 0;
+    const client = { from(table) {
+      if (table === "people") return {
+        insert(row) { writes.push({ mode: "insert", row }); return { select: () => ({ single: async () => ({ data: { id: "new-server" }, error: null }) }) }; },
+        update(row) { const entry = { mode: "update", row, filters: [] }; writes.push(entry); return { eq(key, value) { entry.filters.push([key, value]); return this; }, select: () => ({ single: async () => ({ data: { id: personId }, error: null }) }) }; },
+      };
+      return { delete: () => ({ eq: async () => ({ error: null }) }), insert: async () => ({ error: null }) };
+    } };
+    const Component = loadTs("../src/components/dashboard.tsx", {
+      react: { ...React, useState(initial) { const slot = index++; if (!(slot in hooks)) hooks[slot] = initial; return [hooks[slot], (value) => { hooks[slot] = value; }]; }, useEffect() {} },
+      "next/link": ({ children }) => children,
+      "next/navigation": { useRouter: () => ({ push() {} }) },
+      "@/lib/supabase/client": { createClient: () => client },
+      "@/components/auto-assignment-controls": { AutoAssignmentControls: () => null },
+    }, {}, "\nexport { PeopleView }; ").PeopleView;
+    const props = { parishId: "p1", personId, canEdit: true, people, services: [], categories: [], reload: async () => {} };
+    const render = () => { index = 0; return Component(props); };
+    function find(node, match) {
+      if (!node || typeof node !== "object") return null;
+      if (match(node)) return node;
+      for (const child of [node.props?.children].flat(Infinity)) {
+        const found = find(child, match); if (found) return found;
+      }
+      return null;
+    }
+    const select = find(render(), (node) => node.props?.["aria-label"] === "Clase del servidor");
+    assert(select);
+    select.props.onChange({ target: { value: selectedClass } });
+    const save = find(render(), (node) => node.type === "button" && node.props?.children === "Guardar");
+    return { writes, save: () => save.props.onClick() };
+  }
+  const created = exercise("nuevo", [], "crecimiento-5");
+  await created.save();
+  assert.equal(created.writes[0].mode, "insert");
+  assert.equal(created.writes[0].row.class_id, "crecimiento-5");
+
+  const existing = { id: "server-1", parish_id: "p1", first_name: "Ana", last_name: "Castelo", class_id: "crecimiento-jovenes-1", services: [], active: true };
+  const edited = exercise("server-1", [existing], "crecimiento-4");
+  await edited.save();
+  assert.equal(edited.writes[0].mode, "update");
+  assert.equal(edited.writes[0].row.class_id, "crecimiento-4");
+  assert.deepEqual(edited.writes[0].filters, [["id", "server-1"], ["parish_id", "p1"]]);
+  assert.equal(existing.class_id, "crecimiento-jovenes-1");
 });

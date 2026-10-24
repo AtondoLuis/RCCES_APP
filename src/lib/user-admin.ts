@@ -4,8 +4,8 @@ import { APP_ROLES } from "@/lib/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AccessError, type requireAdmin } from "@/lib/admin-access";
 const fields = { full_name: z.string().trim().min(1).max(150), role: z.enum(APP_ROLES),
-  active: z.boolean(), person_id: z.string().uuid().nullable() };
-const inviteSchema = z.object({ ...fields, email: z.string().trim().email().max(254).transform((s) => s.toLowerCase()) }).strict();
+  active: z.boolean(), person_id: z.guid().nullable() };
+const inviteSchema = z.object({ ...fields, active: z.boolean().default(true), person_id: z.union([z.guid(), z.literal(""), z.null()]).optional().transform((value) => value || null), email: z.string().trim().email().max(254).transform((s) => s.toLowerCase()) }).strict();
 const updateSchema = z.object({ ...fields, id: z.string().uuid() }).strict();
 type Context = Awaited<ReturnType<typeof requireAdmin>>;
 function dbError(error: { code?: string } | null) {
@@ -54,7 +54,17 @@ export async function listAppUsers(context: Context, page = 0) {
 }
 export async function inviteAppUser(context: Context, body: unknown) {
   const parsed = inviteSchema.safeParse(body);
-  if (!parsed.success) throw new AccessError(400, "Datos invalidos. Completa nombre, email, rol y estado; no envies parroquia.");
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const field = issue.path[0];
+    const detail = field === "email" ? "Ingresa un email valido (nombre@dominio.com)."
+      : field === "full_name" ? "Ingresa el nombre del usuario (maximo 150 caracteres)."
+      : field === "role" ? "Selecciona un rol valido."
+      : field === "person_id" ? "Selecciona un servidor valido de la lista o deja Sin vincular."
+      : field === "active" ? "El estado del usuario debe ser valido."
+      : "La solicitud contiene campos no permitidos; no envies parroquia.";
+    throw new AccessError(400, detail);
+  }
   const input = parsed.data;
   await validatePerson(context, input.person_id);
   const duplicate = await context.client.from("profiles").select("id").eq("parish_id", context.profile.parish_id).eq("email", input.email).maybeSingle();

@@ -221,3 +221,33 @@ test('ADMIN can assign the new role through existing user editing validation',as
   assert.equal((await h.route.PATCH(request('PATCH',value))).status,200);
   assert.equal(h.profiles[1].role,'COORDINADOR_LITURGIA');
 });
+
+test('invitation validation identifies the invalid field and accepts an unlinked coordinator', async () => {
+  const invalidEmail = harness();
+  const emailResponse = await invalidEmail.route.POST(request('POST', body({ email: 'ana@invalid' })));
+  assert.equal(emailResponse.status, 400);
+  assert.match((await emailResponse.json()).error, /email valido/);
+  const invalidPerson = harness();
+  const personResponse = await invalidPerson.route.POST(request('POST', body({ person_id: 'not-a-uuid' })));
+  assert.equal(personResponse.status, 400);
+  assert.match((await personResponse.json()).error, /servidor valido/);
+  const valid = harness();
+  const invitation = body({ full_name: 'Ana', role: 'COORDINADOR', person_id: '' });
+  delete invitation.active;
+  const response = await valid.route.POST(request('POST', invitation));
+  assert.equal(response.status, 201);
+  assert.equal(valid.invitations.length, 1);
+  assert.equal(valid.profiles.find((profile) => profile.id === uuid(50)).person_id, null);
+});
+
+test('invitation accepts a linked server with a PostgreSQL-valid legacy UUID', async () => {
+  const h = harness();
+  const legacyId = '00000000-0000-0000-0000-000000000020';
+  h.records.people.push({ id: legacyId, parish_id: uuid(10), first_name: 'Ana', last_name: 'Castelo' });
+  const response = await h.route.POST(request('POST', body({
+    full_name: 'Ana Castelo', email: 'anacastelorodelo@hotmail.com',
+    role: 'COORDINADOR', person_id: legacyId,
+  })));
+  assert.equal(response.status, 201);
+  assert.equal(h.profiles.find((profile) => profile.id === uuid(50)).person_id, legacyId);
+});
