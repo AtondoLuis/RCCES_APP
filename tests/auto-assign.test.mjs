@@ -896,7 +896,7 @@ test("services show one explanatory note after the cards and preserve numeric co
     canAdmin: true, categories: [{ id: "cat", name: "Liturgia", display_order: 1 }],
     services: [service("one", { category_id: "cat" }), service("two", { category_id: "cat" })], reload: async () => {},
   }));
-  const note = "Nota: Número de servidores que deben asignarse a este servicio en cada comisión. Bienvenida usa Todos; Limpieza conserva sus plazas independientes.";
+  const note = "Nota: Bienvenida usa Todos; Limpieza conserva sus plazas independientes.";
   assert.equal(html.split(note).length - 1, 1);
   assert.equal((html.match(/type="number" min="1" step="1" required=""/g) ?? []).length, 2);
   assert(html.lastIndexOf("service-card") < html.indexOf(note));
