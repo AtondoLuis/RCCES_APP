@@ -513,11 +513,11 @@ test("preview omits workflow status while retaining incidental status words in c
 
 const ReactForLists = require("react");
 const listComponents = loadTs("../src/components/dashboard.tsx", {
-  "next/link": ({ children, href }) => ReactForLists.createElement("a", { href }, children),
+  "next/link": ({ children, ...props }) => ReactForLists.createElement("a", props, children),
   "next/navigation": { useRouter: () => ({ push: () => {} }) },
   "@/lib/supabase/client": { createClient: () => null },
   "@/components/auto-assignment-controls": { AutoAssignmentControls: () => null },
-}, {}, "\nexport { PeopleView, Commissions, Home }; ");
+}, {}, "\nexport { PeopleView, Commissions, Home, ServicesAdmin }; ");
 test("server list renders an active-only initial view with a responsive status select", () => {
   const html = require("react-dom/server").renderToStaticMarkup(ReactForLists.createElement(listComponents.PeopleView, {
     parishId: "p1", canEdit: false, categories: [], services: [], reload: () => {}, people: [
@@ -712,7 +712,8 @@ test("server list and form expose compact class labels and the saved selection",
   const person = { id: "server-1", parish_id: "p1", first_name: "Ana", last_name: "Castelo", active: true, class_id: "crecimiento-jovenes-2", services: [] };
   const base = { parishId: "p1", canEdit: true, categories: [], services: [], reload: () => {}, people: [person] };
   const list = render(base);
-  assert(list.includes("Clase: Crecimiento Jóvenes 2"));
+  assert(list.includes("Crecimiento Jóvenes 2"));
+  assert(list.includes("lg:grid-cols-["));
   assert(list.includes('aria-label="Filtrar por clase"'));
   assert(list.includes("Todas las clases") && list.includes("Sin asignar"));
   assert(!list.includes("overflow-x-auto"));
@@ -787,7 +788,7 @@ test("server form creates with a class and edits it without changing the server 
   assert.equal(existing.class_id, "crecimiento-jovenes-1");
 });
 
-test("server summary counts the parish independently of class, status, and search filters", () => {
+test("server summary uses the selected state for both class count and denominator", () => {
   const { countPeopleSummary } = loadTs("../src/lib/dashboard-metrics.ts");
   const people = [
     { parish_id: "p1", active: true, class_id: "crecimiento-5" },
@@ -796,19 +797,29 @@ test("server summary counts the parish independently of class, status, and searc
     { parish_id: "p1", active: false, class_id: "crecimiento-5" },
     { parish_id: "p2", active: true, class_id: "crecimiento-5" },
   ];
-  assert.deepEqual(plain(countPeopleSummary(people, "p1", "all")), { active: 3, inactive: 1, inClassActive: 3 });
-  assert.deepEqual(plain(countPeopleSummary(people, "p1", "crecimiento-5")), { active: 3, inactive: 1, inClassActive: 2 });
-  assert.deepEqual(plain(countPeopleSummary(people, "p1", "unassigned")), { active: 3, inactive: 1, inClassActive: 1 });
-  assert.deepEqual(plain(countPeopleSummary([], "p1", "crecimiento-5")), { active: 0, inactive: 0, inClassActive: 0 });
+  const expected = [
+    ["all", "all", 4, 4],
+    ["crecimiento-5", "all", 4, 3],
+    ["crecimiento-5", "active", 3, 2],
+    ["crecimiento-5", "inactive", 1, 1],
+    ["unassigned", "all", 4, 1],
+    ["unassigned", "active", 3, 1],
+    ["unassigned", "inactive", 1, 0],
+    ["all", "inactive", 1, 1],
+  ];
+  for (const [classId, state, total, matchingClass] of expected) {
+    assert.deepEqual(plain(countPeopleSummary(people, "p1", classId, state)), { active: 3, inactive: 1, total, matchingClass });
+  }
+  assert.deepEqual(plain(countPeopleSummary([], "p1", "crecimiento-5", "all")), { active: 0, inactive: 0, total: 0, matchingClass: 0 });
 });
 
-test("server summary updates with class and data changes while combined filters and empty lists remain usable", () => {
+test("server summary ignores search, updates with filters and data, and keeps empty lists usable", () => {
   const React = require("react");
   const hooks = [];
   let index = 0;
   const Component = loadTs("../src/components/dashboard.tsx", {
     react: { ...React, useState(initial) { const slot = index++; if (!(slot in hooks)) hooks[slot] = initial; return [hooks[slot], (value) => { hooks[slot] = value; }]; }, useEffect() {} },
-    "next/link": ({ children, href }) => React.createElement("a", { href }, children),
+    "next/link": ({ children, ...props }) => React.createElement("a", props, children),
     "next/navigation": { useRouter: () => ({ push() {} }) },
     "@/lib/supabase/client": { createClient: () => null },
     "@/components/auto-assignment-controls": { AutoAssignmentControls: () => null },
@@ -816,9 +827,9 @@ test("server summary updates with class and data changes while combined filters 
   const props = {
     parishId: "p1", canEdit: false, categories: [], services: [], reload: () => {},
     people: [
-      { id: "ana", parish_id: "p1", first_name: "Ana", last_name: "", active: true, class_id: "crecimiento-5", services: [] },
-      { id: "bea", parish_id: "p1", first_name: "Bea", last_name: "", active: true, class_id: null, services: [] },
-      { id: "cora", parish_id: "p1", first_name: "Cora", last_name: "", active: false, class_id: "crecimiento-5", services: [] },
+      { id: "ana", parish_id: "p1", first_name: "Ana", last_name: "", email: "ana@example.test", active: true, class_id: "crecimiento-5", services: [] },
+      { id: "bea", parish_id: "p1", first_name: "Bea", last_name: "", email: "bea@example.test", active: true, class_id: null, services: [] },
+      { id: "cora", parish_id: "p1", first_name: "Cora", last_name: "", email: "cora@example.test", active: false, class_id: "crecimiento-5", services: [] },
       { id: "foreign", parish_id: "p2", first_name: "Foreign", last_name: "", active: true, class_id: "crecimiento-5", services: [] },
     ],
   };
@@ -831,23 +842,63 @@ test("server summary updates with class and data changes while combined filters 
     }
     return null;
   }
+  const change = (tree, key, value) => find(tree, (node) => node.props?.["aria-label"] === key || node.props?.placeholder === key).props.onChange({ target: { value } });
   let view = render();
   assert(view.html.includes("Activos: 2") && view.html.includes("Inactivos: 1"));
   assert(view.html.includes("2 servidores activos en total"));
   assert(!view.html.includes("Foreign"));
-  find(view.tree, (node) => node.props?.["aria-label"] === "Filtrar por clase").props.onChange({ target: { value: "crecimiento-5" } });
+  change(view.tree, "Filtrar por clase", "crecimiento-5");
   view = render();
-  assert(view.html.includes("1/2 servidores en esta clase"));
+  assert(view.html.includes("1/2 servidores activos en esta clase"));
   assert(view.html.includes("Ana") && !view.html.includes("Bea") && !view.html.includes("Cora"));
-  find(view.tree, (node) => node.props?.placeholder === "Nombre o email").props.onChange({ target: { value: "Nobody" } });
+  change(view.tree, "Estado de servidores", "all");
+  view = render();
+  assert(view.html.includes("2/3 servidores en esta clase"));
+  change(view.tree, "Estado de servidores", "inactive");
+  view = render();
+  assert(view.html.includes("1/1 servidores inactivos en esta clase"));
+  change(view.tree, "Nombre o email", "Nobody");
   view = render();
   assert(view.html.includes("No hay servidores que coincidan"));
-  assert(view.html.includes("Activos: 2") && view.html.includes("1/2 servidores en esta clase"));
-  find(view.tree, (node) => node.props?.["aria-label"] === "Estado de servidores").props.onChange({ target: { value: "inactive" } });
+  assert(view.html.includes("1/1 servidores inactivos en esta clase"));
+  assert(view.html.includes("Activos: 2") && view.html.includes("Inactivos: 1"));
+  change(view.tree, "Filtrar por clase", "all");
   view = render();
-  assert(view.html.includes("Inactivos: 1") && view.html.includes("1/2 servidores en esta clase"));
+  assert(view.html.includes("1 servidores inactivos en total"));
+  change(view.tree, "Estado de servidores", "all");
+  change(render().tree, "Nombre o email", "ana@example.test");
+  view = render();
+  assert(view.html.includes("Ana") && !view.html.includes("Bea") && !view.html.includes("Cora"));
+  assert(view.html.includes("3 servidores en total"));
   props.people = props.people.map((person) => person.id === "ana" ? { ...person, active: false, class_id: "crecimiento-4" } : person);
   view = render();
   assert(view.html.includes("Activos: 1") && view.html.includes("Inactivos: 2"));
-  assert(view.html.includes("0/1 servidores en esta clase"));
+  assert(view.html.includes("3 servidores en total"));
+});
+
+test("server rows keep navigation and four desktop columns with mobile wrapping", () => {
+  const React = require("react");
+  const html = require("react-dom/server").renderToStaticMarkup(React.createElement(listComponents.PeopleView, {
+    parishId: "p1", canEdit: true, categories: [], services: [], reload: () => {},
+    people: [{ id: "ana", parish_id: "p1", first_name: "Ana", last_name: "Castelo", email: "verylong@example.test", active: true, class_id: "crecimiento-jovenes-1", services: [] }],
+  }));
+  assert.match(html, /href="\/servidores\/ana"/);
+  assert.match(html, /<b[^>]*>Ana Castelo<\/b>/);
+  assert(html.includes("verylong@example.test") && html.includes("Crecimiento Jóvenes 1"));
+  assert(html.includes("lg:grid-cols-[") && html.includes("grid-cols-[minmax(0,1fr)_auto]"));
+  assert(html.includes("break-all") && html.includes("break-words") && html.includes("min-w-0"));
+  assert(html.includes("Nuevo servidor"));
+});
+
+test("services show one explanatory note after the cards and preserve numeric controls", () => {
+  const React = require("react");
+  const html = require("react-dom/server").renderToStaticMarkup(React.createElement(listComponents.ServicesAdmin, {
+    canAdmin: true, categories: [{ id: "cat", name: "Liturgia", display_order: 1 }],
+    services: [service("one", { category_id: "cat" }), service("two", { category_id: "cat" })], reload: async () => {},
+  }));
+  const note = "Nota: Número de servidores que deben asignarse a este servicio en cada comisión. Bienvenida usa Todos; Limpieza conserva sus plazas independientes.";
+  assert.equal(html.split(note).length - 1, 1);
+  assert.equal((html.match(/type="number" min="1" step="1" required=""/g) ?? []).length, 2);
+  assert(html.lastIndexOf("service-card") < html.indexOf(note));
+  assert(html.includes("Guardar") && html.includes("Desactivar"));
 });
