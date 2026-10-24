@@ -520,9 +520,9 @@ const listComponents = loadTs("../src/components/dashboard.tsx", {
 }, {}, "\nexport { PeopleView, Commissions, Home }; ");
 test("server list renders an active-only initial view with a responsive status select", () => {
   const html = require("react-dom/server").renderToStaticMarkup(ReactForLists.createElement(listComponents.PeopleView, {
-    canEdit: false, categories: [], services: [], reload: () => {}, people: [
-      { id: "active", first_name: "VisibleActive", last_name: "", active: true, services: [] },
-      { id: "inactive", first_name: "HiddenInactive", last_name: "", active: false, services: [] },
+    parishId: "p1", canEdit: false, categories: [], services: [], reload: () => {}, people: [
+      { id: "active", parish_id: "p1", first_name: "VisibleActive", last_name: "", active: true, services: [] },
+      { id: "inactive", parish_id: "p1", first_name: "HiddenInactive", last_name: "", active: false, services: [] },
     ],
   }));
   assert(html.includes("VisibleActive")); assert(!html.includes("HiddenInactive"));
@@ -785,4 +785,69 @@ test("server form creates with a class and edits it without changing the server 
   assert.equal(edited.writes[0].row.class_id, "crecimiento-4");
   assert.deepEqual(edited.writes[0].filters, [["id", "server-1"], ["parish_id", "p1"]]);
   assert.equal(existing.class_id, "crecimiento-jovenes-1");
+});
+
+test("server summary counts the parish independently of class, status, and search filters", () => {
+  const { countPeopleSummary } = loadTs("../src/lib/dashboard-metrics.ts");
+  const people = [
+    { parish_id: "p1", active: true, class_id: "crecimiento-5" },
+    { parish_id: "p1", active: true, class_id: "crecimiento-5" },
+    { parish_id: "p1", active: true, class_id: null },
+    { parish_id: "p1", active: false, class_id: "crecimiento-5" },
+    { parish_id: "p2", active: true, class_id: "crecimiento-5" },
+  ];
+  assert.deepEqual(plain(countPeopleSummary(people, "p1", "all")), { active: 3, inactive: 1, inClassActive: 3 });
+  assert.deepEqual(plain(countPeopleSummary(people, "p1", "crecimiento-5")), { active: 3, inactive: 1, inClassActive: 2 });
+  assert.deepEqual(plain(countPeopleSummary(people, "p1", "unassigned")), { active: 3, inactive: 1, inClassActive: 1 });
+  assert.deepEqual(plain(countPeopleSummary([], "p1", "crecimiento-5")), { active: 0, inactive: 0, inClassActive: 0 });
+});
+
+test("server summary updates with class and data changes while combined filters and empty lists remain usable", () => {
+  const React = require("react");
+  const hooks = [];
+  let index = 0;
+  const Component = loadTs("../src/components/dashboard.tsx", {
+    react: { ...React, useState(initial) { const slot = index++; if (!(slot in hooks)) hooks[slot] = initial; return [hooks[slot], (value) => { hooks[slot] = value; }]; }, useEffect() {} },
+    "next/link": ({ children, href }) => React.createElement("a", { href }, children),
+    "next/navigation": { useRouter: () => ({ push() {} }) },
+    "@/lib/supabase/client": { createClient: () => null },
+    "@/components/auto-assignment-controls": { AutoAssignmentControls: () => null },
+  }, {}, "\nexport { PeopleView }; ").PeopleView;
+  const props = {
+    parishId: "p1", canEdit: false, categories: [], services: [], reload: () => {},
+    people: [
+      { id: "ana", parish_id: "p1", first_name: "Ana", last_name: "", active: true, class_id: "crecimiento-5", services: [] },
+      { id: "bea", parish_id: "p1", first_name: "Bea", last_name: "", active: true, class_id: null, services: [] },
+      { id: "cora", parish_id: "p1", first_name: "Cora", last_name: "", active: false, class_id: "crecimiento-5", services: [] },
+      { id: "foreign", parish_id: "p2", first_name: "Foreign", last_name: "", active: true, class_id: "crecimiento-5", services: [] },
+    ],
+  };
+  const render = () => { index = 0; const tree = Component(props); return { tree, html: require("react-dom/server").renderToStaticMarkup(tree) }; };
+  function find(node, match) {
+    if (!node || typeof node !== "object") return null;
+    if (match(node)) return node;
+    for (const child of [node.props?.children].flat(Infinity)) {
+      const result = find(child, match); if (result) return result;
+    }
+    return null;
+  }
+  let view = render();
+  assert(view.html.includes("Activos: 2") && view.html.includes("Inactivos: 1"));
+  assert(view.html.includes("2 servidores activos en total"));
+  assert(!view.html.includes("Foreign"));
+  find(view.tree, (node) => node.props?.["aria-label"] === "Filtrar por clase").props.onChange({ target: { value: "crecimiento-5" } });
+  view = render();
+  assert(view.html.includes("1/2 servidores en esta clase"));
+  assert(view.html.includes("Ana") && !view.html.includes("Bea") && !view.html.includes("Cora"));
+  find(view.tree, (node) => node.props?.placeholder === "Nombre o email").props.onChange({ target: { value: "Nobody" } });
+  view = render();
+  assert(view.html.includes("No hay servidores que coincidan"));
+  assert(view.html.includes("Activos: 2") && view.html.includes("1/2 servidores en esta clase"));
+  find(view.tree, (node) => node.props?.["aria-label"] === "Estado de servidores").props.onChange({ target: { value: "inactive" } });
+  view = render();
+  assert(view.html.includes("Inactivos: 1") && view.html.includes("1/2 servidores en esta clase"));
+  props.people = props.people.map((person) => person.id === "ana" ? { ...person, active: false, class_id: "crecimiento-4" } : person);
+  view = render();
+  assert(view.html.includes("Activos: 1") && view.html.includes("Inactivos: 2"));
+  assert(view.html.includes("0/1 servidores en esta clase"));
 });

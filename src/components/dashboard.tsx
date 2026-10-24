@@ -10,7 +10,7 @@ import { AutoAssignmentControls } from "@/components/auto-assignment-controls";
 import { assignedMassServiceNames, canAssignToService } from "@/lib/commission-assignments";
 import { previewAssignmentNames, repeatedPersonIds } from "@/lib/commission-preview";
 import { isCategoryVisible, isServiceVisible, previewVisibility, togglePreviewVisibility, visibleByDefault, type PreviewVisibility } from "@/lib/preview-visibility";
-import { countPeopleByStatus } from "@/lib/dashboard-metrics";
+import { countPeopleByStatus, countPeopleSummary } from "@/lib/dashboard-metrics";
 
 import { fixedServiceText, isMassService, getRequiredAssignmentCount, hasFixedAssignmentCount, assignmentRows, isValidRequiredServers } from "@/lib/service-rules";
 import { statusLabel, statusTransitions } from "@/lib/commission-status";
@@ -309,13 +309,19 @@ function PeopleView({ parishId, canEdit, personId, people, services, categories,
   }
 
   if (!personId) {
-    const filtered = people.filter((person) => matchesPeopleFilter(person, search, stateFilter, classFilter));
+    const summary = countPeopleSummary(people, parishId, classFilter);
+    const filtered = people.filter((person) => person.parish_id === parishId && matchesPeopleFilter(person, search, stateFilter, classFilter));
     return <>
       <div className="mb-5 flex flex-wrap justify-between gap-3"><h1 className="text-2xl font-bold">Servidores</h1>{canEdit && <Link className="button-link primary bg-[#13263d] text-sm text-white hover:bg-[#1d3a5b]" href="/servidores/nuevo"><Plus size={17}/> Nuevo servidor</Link>}</div>
       <div className="mb-4 grid gap-3 rounded-lg border bg-white p-4 sm:grid-cols-3">
         <label className="text-sm font-bold">Buscar servidor<input className="mt-1 w-full" placeholder="Nombre o email" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
         <label className="text-sm font-bold">Estado<select aria-label="Estado de servidores" className="mt-1 w-full" value={stateFilter} onChange={(event) => setStateFilter(event.target.value as PeopleStatusFilter)}><option value="active">Activos</option><option value="inactive">Inactivos</option><option value="all">Todos</option></select></label>
         <label className="text-sm font-bold">Clase<select aria-label="Filtrar por clase" className="mt-1 w-full" value={classFilter} onChange={(event) => setClassFilter(event.target.value as ServerClassFilter)}><option value="all">Todas las clases</option>{SERVER_CLASSES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}<option value="unassigned">Sin asignar</option></select></label>
+      </div>
+      <div role="status" aria-live="polite" aria-label="Resumen de servidores" className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border bg-white px-4 py-3 text-sm">
+        <span><b>Activos: {summary.active}</b></span>
+        <span><b>Inactivos: {summary.inactive}</b></span>
+        <span className="text-slate-600">{classFilter === "all" ? `${summary.active} servidores activos en total` : `${summary.inClassActive}/${summary.active} servidores en esta clase`}</span>
       </div>
       {filtered.length ? filtered.map((person) => <Link key={person.id} href={`/servidores/${person.id}`} className="mb-3 block card-panel p-4 transition hover:border-[#13263d] hover:shadow-md">
         <b className="break-words">{person.display_name || `${person.first_name} ${person.last_name}`}</b>
