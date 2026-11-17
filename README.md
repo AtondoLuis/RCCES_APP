@@ -62,6 +62,11 @@ Solo ADMIN administra usuarios de su propia parroquia. COORDINADOR mantiene comi
 El estado de invitacion se obtiene de Auth (`invited_at`, sin confirmacion ni ultimo acceso); no se infiere de la fecha del perfil. Sin clave administrativa el listado y la edicion de perfiles siguen disponibles, pero invitaciones/ultimo acceso no. Si el envio de email tiene exito y la preparacion del perfil falla, la API lo informa explicitamente y la cuenta queda sin acceso hasta reparar el perfil; no se elimina la cuenta de Auth como compensacion. No se agrego infraestructura de auditoria porque el proyecto no tenia una.
 
 
+### Tesoreria y asistencias
+
+Las migraciones `20261117000000_add_treasurer_role.sql` y `20261117000100_treasury_attendance_modules.sql` ya se aplicaron en el proyecto Supabase configurado para este entorno. La primera agrega el rol `TESORERO`; la segunda crea el modelo de movimientos, aportaciones, actividad y asistencias, indices, RLS y funciones RPC atomicas. Para otros entornos, aplicar ambas en orden mediante Supabase CLI. Las aportaciones se sincronizan transaccionalmente con Tesoreria; las anulaciones quedan auditadas. Las exportaciones PDF usan el dialogo de impresion del navegador (Imprimir/Guardar como PDF).
+
+
 ### Coordinacion liturgica, visibilidad y plazas
 
 Aplicar en orden las migraciones nuevas `20261023200248_add_liturgy_coordinator_role.sql` y `20261023200253_commission_visibility_and_service_slots.sql` antes de desplegar este codigo. La primera confirma el valor ENUM en una transaccion separada. No reaplicar ni editar migraciones anteriores.

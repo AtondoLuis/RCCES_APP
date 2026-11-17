@@ -1,4 +1,4 @@
-export const APP_ROLES = ["ADMIN", "COORDINADOR", "COORDINADOR_LITURGIA", "LECTOR"] as const;
+export const APP_ROLES = ["ADMIN", "TESORERO", "COORDINADOR", "COORDINADOR_LITURGIA", "LECTOR"] as const;
 export type AppRole = typeof APP_ROLES[number];
 export type AccessProfile = { role: string; active: boolean; parish_id: string | null };
 export function canUseApp(profile?: AccessProfile | null): boolean {
@@ -8,11 +8,15 @@ export function permissionsFor(role: string) {
   const known = APP_ROLES.some((value) => value === role);
   const admin = role === "ADMIN";
   const peopleEditor = admin || role === "COORDINADOR";
+  const treasuryManager = admin || role === "TESORERO";
+  const attendanceManager = admin || role === "COORDINADOR" || role === "COORDINADOR_LITURGIA";
   const commissionEditor = peopleEditor || role === "COORDINADOR_LITURGIA";
   return { manageUsers: admin, manageConfiguration: admin, manageServices: admin, manageSchedules: admin, manageSettings: admin,
     viewCommissions: known, createCommission: commissionEditor, editCommissions: commissionEditor,
     assignServices: commissionEditor, autoAssign: commissionEditor, confirmCommission: commissionEditor,
-    reopenCompleted: peopleEditor, viewPeople: known && role !== "COORDINADOR_LITURGIA", editPeople: peopleEditor };
+    reopenCompleted: peopleEditor, viewPeople: known && role !== "COORDINADOR_LITURGIA", editPeople: peopleEditor,
+    viewTreasury: treasuryManager, manageTreasury: treasuryManager,
+    viewAttendance: known, manageAttendance: attendanceManager };
 }
 export function canManageUsers(profile?: AccessProfile | null): boolean {
   return canUseApp(profile) && permissionsFor(profile!.role).manageUsers;
@@ -30,6 +34,12 @@ export function canAccessPath(role: string, path: string): boolean {
   if (path.startsWith("/comisiones")) {
     if (!permission.viewCommissions) return false;
     if (path.endsWith("/nueva") || path.endsWith("/editar")) return permission.editCommissions;
+  }
+  if (path.startsWith("/tesoreria") || path.startsWith("/aportaciones")) {
+    if (!permission.viewTreasury) return false;
+  }
+  if (path.startsWith("/asistencias")) {
+    if (!permission.viewAttendance) return false;
   }
   return true;
 }
