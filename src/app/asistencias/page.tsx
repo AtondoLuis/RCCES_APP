@@ -22,11 +22,20 @@ export default function AttendancePage(){
  const [statusFilter,setStatusFilter]=useState("active");
  const [canManage,setCanManage]=useState(false);
 
+ const loadCurrentProfile=useCallback(async()=>{
+  if(!supabase)return null;
+  const {data:userData,error:userError}=await supabase.auth.getUser();
+  if(userError||!userData.user){setError(userError?.message??"No se pudo verificar la sesión.");return null;}
+  const profile=await supabase.from("profiles").select("role,parish_id").eq("id",userData.user.id).maybeSingle();
+  if(profile.error||!profile.data){setError(profile.error?.message??"No se encontró el perfil activo.");return null;}
+  return profile.data;
+ },[supabase]);
+
  const load=useCallback(async()=>{
   if(!supabase)return;
-  const profile=await supabase.from("profiles").select("role").maybeSingle();
-  if(profile.error||!profile.data?.role){setError(profile.error?.message??"No se pudo verificar el perfil.");return;}
-  setCanManage(permissionsFor(profile.data.role).manageAttendance);
+  const profile=await loadCurrentProfile();
+  if(!profile?.role)return;
+  setCanManage(permissionsFor(profile.role).manageAttendance);
   const [typeRes,activityRes,peopleRes]=await Promise.all([
    supabase.from("activity_types").select("id,name,active").eq("active",true).order("display_order"),
    supabase.from("community_activities").select("id,name,activity_date,start_time,status,capture_status,activity_type_id").order("activity_date",{ascending:false}),
@@ -34,7 +43,7 @@ export default function AttendancePage(){
   ]);
   if(typeRes.error||activityRes.error||peopleRes.error)setError(typeRes.error?.message||activityRes.error?.message||peopleRes.error?.message||"");
   setTypes((typeRes.data??[])as ActivityType[]);setActivities((activityRes.data??[])as Activity[]);setPeople((peopleRes.data??[])as Person[]);
- },[supabase]);
+ },[loadCurrentProfile,supabase]);
  useEffect(()=>{const timer=window.setTimeout(()=>{void load();},0);return()=>window.clearTimeout(timer);},[load]);
  useEffect(()=>{
   if(!supabase||!selectedActivity)return;
@@ -50,9 +59,9 @@ export default function AttendancePage(){
 
  async function createActivity(){
   if(!supabase||!typeId||!name.trim()||!date)return;
-  const profile=await supabase.from("profiles").select("parish_id").maybeSingle();
-  if(profile.error||!profile.data?.parish_id){setError("No se pudo determinar la parroquia.");return;}
-  const result=await supabase.from("community_activities").insert({parish_id:profile.data.parish_id,activity_type_id:typeId,name:name.trim(),activity_date:date,start_time:time,status:"scheduled",capture_status:"pending"}).select("id").single();
+  const profile=await loadCurrentProfile();
+  if(!profile?.parish_id)return;
+  const result=await supabase.from("community_activities").insert({parish_id:profile.parish_id,activity_type_id:typeId,name:name.trim(),activity_date:date,start_time:time,status:"scheduled",capture_status:"pending"}).select("id").single();
   if(result.error)setError(result.error.message);else{setSaved("Actividad creada");setName("");setDate("");await load();setSelectedActivity(result.data.id);}
  }
  async function addParticipant(serverId:string){

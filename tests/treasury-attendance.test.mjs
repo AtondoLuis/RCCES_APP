@@ -21,3 +21,10 @@ test("permissions expose treasury and attendance to compatible roles", async () 
   assert.match(source, /path\.startsWith\("\/tesoreria"\)/);
   assert.match(source, /path\.startsWith\("\/asistencias"\)/);
 });
+
+test("attendance profile lookups are limited to the authenticated user", () => {
+  const source = readFileSync(new URL("../src/app/asistencias/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /supabase\.auth\.getUser\(\)/);
+  assert.match(source, /\.from\("profiles"\)\.select\("role,parish_id"\)\.eq\("id",userData\.user\.id\)\.maybeSingle\(\)/);
+  assert.doesNotMatch(source, /\.from\("profiles"\)\.select\("role"\)\.maybeSingle\(\)/);
+});
