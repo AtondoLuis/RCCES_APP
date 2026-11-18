@@ -35,15 +35,36 @@ export async function updateSession(request: NextRequest) {
       if (request.nextUrl.pathname.startsWith("/api/")) return NextResponse.json({ error: "Tu acceso esta desactivado o no tienes perfil." }, { status: 403 });
       return NextResponse.redirect(new URL("/login?acceso=desactivado", request.url));
     }
-    if (!canAccessPath(profile!.role, request.nextUrl.pathname)) return new NextResponse("Acceso denegado.", { status: 403 });
+    const path = request.nextUrl.pathname;
+    const permissionForPath = path === "/portal" ? "portal.view"
+      : path === "/admin/usuarios/permisos" ? "users.manage_permissions"
+      : path === "/admin/avisos" ? "notices.manage"
+      : path.startsWith("/tesoreria") || path.startsWith("/aportaciones") || path.startsWith("/admin/tesoreria") ? "treasury.view"
+      : path.startsWith("/asistencias") ? "attendance.manage"
+      : path.startsWith("/comisiones/") && (path.endsWith("/nueva") || path.endsWith("/editar")) ? "commissions.manage"
+      : profile!.role === "SERVIDOR" && path.startsWith("/comisiones") ? "commissions.view_own"
+      : null;
+    const [pathPermission, commissionManager] = await Promise.all([
+      permissionForPath ? supabase.rpc("has_app_permission", { p_permission: permissionForPath }) : Promise.resolve({ data: true, error: null }),
+      path.startsWith("/comisiones") ? supabase.rpc("has_app_permission", { p_permission: "commissions.manage" }) : Promise.resolve({ data: false, error: null }),
+    ]);
+    const attendanceViewer = path.startsWith("/asistencias") ? await supabase.rpc("has_app_permission", { p_permission: "attendance.view_all" }) : { data: false, error: null };
+    if (pathPermission.error || commissionManager.error || attendanceViewer.error) return new NextResponse("No se pudieron verificar los permisos. Revisa las migraciones.", { status: 503 });
+    const customPathAllowed = pathPermission.data || (path.startsWith("/asistencias") && attendanceViewer.data);
+    if (!customPathAllowed || (!permissionForPath && !canAccessPath(profile!.role, path) && !(path.startsWith("/comisiones") && commissionManager.data))) {
+      return new NextResponse("Acceso denegado.", { status: 403 });
+    }
+    if (path === "/tesoreria" || path === "/aportaciones") {
+      return NextResponse.redirect(new URL("/admin/tesoreria", request.url));
+    }
+    if (path === "/" && profile!.role === "SERVIDOR") return NextResponse.redirect(new URL("/portal", request.url));
     const commissionId = request.nextUrl.pathname.match(/^\/comisiones\/([^/]+)/)?.[1];
     if (commissionId && commissionId !== "nueva") {
       const result = await supabase.from("masses").select("id,status").eq("id", commissionId).eq("parish_id", profile!.parish_id).maybeSingle();
       if (result.error) return new NextResponse("No se pudo verificar la comision.", { status: 503 });
       if (!result.data || !canViewCommission(profile!.role, result.data.status)) return new NextResponse("Acceso denegado.", { status: 403 });
     }
-    if (isLogin) return NextResponse.redirect(new URL("/comisiones", request.url));
+    if (isLogin) return NextResponse.redirect(new URL(profile!.role === "SERVIDOR" ? "/portal" : "/comisiones", request.url));
   }
   return response;
 }
-

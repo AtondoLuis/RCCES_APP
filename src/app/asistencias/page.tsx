@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ModuleShell } from "@/components/module-shell";
 import { createClient } from "@/lib/supabase/client";
-import { permissionsFor } from "@/lib/permissions";
 import { SERVER_CLASSES } from "@/lib/server-classes";
 
 type ActivityType={id:string;name:string;active:boolean};
@@ -35,7 +34,9 @@ export default function AttendancePage(){
   if(!supabase)return;
   const profile=await loadCurrentProfile();
   if(!profile?.role)return;
-  setCanManage(permissionsFor(profile.role).manageAttendance);
+  const permission=await supabase.rpc("has_app_permission",{p_permission:"attendance.manage"});
+  if(permission.error){setError(permission.error.message);return;}
+  setCanManage(permission.data===true);
   const [typeRes,activityRes,peopleRes]=await Promise.all([
    supabase.from("activity_types").select("id,name,active").eq("active",true).order("display_order"),
    supabase.from("community_activities").select("id,name,activity_date,start_time,status,capture_status,activity_type_id").order("activity_date",{ascending:false}),

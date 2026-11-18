@@ -1,12 +1,12 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { Shell } from "@/components/dashboard";
-import { APP_ROLES, type AppRole } from "@/lib/permissions";
+import { APP_PERMISSIONS, APP_ROLES, type AppPermission, type AppRole } from "@/lib/permissions";
 
-type UserRow = { id: string; full_name: string | null; email: string | null; role: AppRole; active: boolean; person_id: string | null; last_sign_in_at: string | null; pending_invitation: boolean | null };
+type UserRow = { id: string; full_name: string | null; email: string | null; role: AppRole; active: boolean; person_id: string | null; phone_contact: string | null; phone_verified_at: string | null; permission_overrides: { permission_key: AppPermission; allowed: boolean }[]; last_sign_in_at: string | null; pending_invitation: boolean | null };
 type PersonOption = { id: string; first_name: string; last_name: string; display_name: string | null };
-type Form = { id?: string; full_name: string; email: string; role: AppRole; active: boolean; person_id: string };
-const emptyForm: Form = { full_name: "", email: "", role: "LECTOR", active: true, person_id: "" };
+type Form = { id?: string; full_name: string; email: string; role: AppRole; active: boolean; person_id: string; phone_contact: string; permission_overrides: { permission_key: AppPermission; allowed: boolean }[] };
+const emptyForm: Form = { full_name: "", email: "", role: "SERVIDOR", active: true, person_id: "", phone_contact: "", permission_overrides: [] };
 const inputClass = "w-full";
 export default function UsersAdmin() {
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -19,13 +19,14 @@ export default function UsersAdmin() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [invitationsConfigured, setInvitationsConfigured] = useState(false);
+  const [actorId, setActorId] = useState("");
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const response = await fetch(`/api/admin/usuarios?page=${page}`, { signal, cache: "no-store" });
       const data = await response.json();
       if (signal?.aborted) return;
       if (!response.ok) throw new Error(data.error || "No se pudieron cargar usuarios.");
-      setUsers(data.users); setPeople(data.people); setTotal(data.total); setInvitationsConfigured(data.invitationsConfigured);
+      setUsers(data.users); setPeople(data.people); setTotal(data.total); setInvitationsConfigured(data.invitationsConfigured); setActorId(data.actorId);
     } catch (e) { if (!signal?.aborted) setError(e instanceof Error ? e.message : "Error al cargar usuarios."); }
     finally { if (!signal?.aborted) setLoading(false); }
   }, [page]);
@@ -36,16 +37,20 @@ export default function UsersAdmin() {
     setBusy(true); setError(""); setMessage("");
     try {
       const payload = { full_name: values.full_name, role: values.role, active: values.active, person_id: values.person_id || null,
+        phone_contact: values.phone_contact,
+        ...(values.id && values.id !== actorId ? { permission_overrides: values.permission_overrides } : {}),
         ...(values.id ? { id: values.id } : { email: values.email }) };
       const response = await fetch("/api/admin/usuarios", { method: values.id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "No se pudo guardar el usuario.");
-      setForm(null); setMessage(values.id ? "Usuario actualizado." : "Invitación enviada. El usuario recibirá un enlace para establecer su acceso."); await load();
+      setForm(null); setMessage(values.id ? "Usuario actualizado." : result.linked
+        ? "Cuenta existente vinculada al perfil de servidor."
+        : "Invitación enviada. El usuario recibirá un enlace para establecer su acceso."); await load();
     } catch (e) { setError(e instanceof Error ? e.message : "No se pudo guardar el usuario."); }
     finally { setBusy(false); }
   }
   function toggle(user: UserRow) {
-    if (window.confirm(`¿${user.active ? "Desactivar" : "Reactivar"} el acceso de ${user.full_name || user.email}?`)) void save({ ...user, full_name: user.full_name || "", email: user.email || "", person_id: user.person_id || "", active: !user.active });
+    if (window.confirm(`¿${user.active ? "Desactivar" : "Reactivar"} el acceso de ${user.full_name || user.email}?`)) void save({ ...user, full_name: user.full_name || "", email: user.email || "", person_id: user.person_id || "", phone_contact: user.phone_contact || "", active: !user.active });
   }
   return <Shell role="ADMIN"><section className="card-panel p-4 sm:p-6">
     <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h1 className="text-2xl font-bold">Usuarios de la app</h1><button className="primary" disabled={busy || !invitationsConfigured} onClick={() => { setForm({ ...emptyForm }); setError(""); }}>+ Nuevo usuario</button></div>
@@ -59,9 +64,18 @@ export default function UsersAdmin() {
         <label>Email<input className={inputClass} type="email" required disabled={busy || !!form.id} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}/></label>
         <label>Rol<select className={inputClass} disabled={busy} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as AppRole })}>{APP_ROLES.map((role) => <option key={role}>{role}</option>)}</select></label>
         <label>Servidor vinculado (opcional)<select className={inputClass} disabled={busy} value={form.person_id} onChange={(e) => setForm({ ...form, person_id: e.target.value })}><option value="">Sin vincular</option>{people.map((p) => <option key={p.id} value={p.id}>{p.display_name || `${p.first_name} ${p.last_name}`}</option>)}</select></label>
+        <label>Celular de contacto<input className={inputClass} type="tel" inputMode="tel" autoComplete="tel" placeholder="+52 664 123 4567" disabled={busy} value={form.phone_contact} onChange={(e) => setForm({ ...form, phone_contact: e.target.value })}/><span className="text-xs font-normal text-slate-500">Se guardará normalizado como +52 y no se verifica por SMS.</span></label>
       </div>
+      {form.id && form.id !== actorId && <fieldset className="rounded-lg border bg-white p-3"><legend className="px-1 font-bold">Permisos individuales</legend><p className="mb-3 text-sm text-slate-600">“Usar permiso del rol” quita la excepción; conceder o denegar sustituye el valor del rol.</p><div className="grid gap-3 sm:grid-cols-2">{APP_PERMISSIONS.map(({ key, label }) => {
+        const override = form.permission_overrides.find((item) => item.permission_key === key);
+        return <label key={key} className="text-sm">{label}<select className={inputClass} disabled={busy} value={override ? override.allowed ? "allow" : "deny" : ""} onChange={(e) => {
+          const permission_overrides = form.permission_overrides.filter((item) => item.permission_key !== key);
+          if (e.target.value) permission_overrides.push({ permission_key: key, allowed: e.target.value === "allow" });
+          setForm({ ...form, permission_overrides });
+        }}><option value="">Usar permiso del rol</option><option value="allow">Conceder</option><option value="deny">Denegar</option></select></label>;
+      })}</div></fieldset>}
       <label className="checkbox-field"><input disabled={busy} type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })}/><span>Activo</span></label>
-      <p className="text-sm text-slate-600">El usuario establece su propia contraseña mediante el enlace de invitación. El email no se modifica aquí.</p>
+      <p className="text-sm text-slate-600">El usuario establece su propia contraseña mediante el enlace de invitación. El email no se modifica aquí. El celular es solo contacto; no es una credencial verificada.</p>
       <div className="flex flex-wrap gap-2"><button className="primary" disabled={busy}>{busy ? "Guardando..." : form.id ? "Guardar cambios" : "Enviar invitación"}</button><button type="button" disabled={busy} onClick={() => setForm(null)}>Cancelar</button></div>
     </form>}
     {loading ? <p role="status">Cargando usuarios...</p> : <>
@@ -69,8 +83,8 @@ export default function UsersAdmin() {
       <div className="space-y-3 lg:space-y-0">{users.map((user) => <article key={user.id} className="grid gap-3 rounded-lg border p-4 text-sm lg:grid-cols-[1.3fr_1.5fr_1fr_1fr_1.3fr_1.2fr_1.5fr] lg:rounded-none lg:border-x-0 lg:border-t-0 lg:px-0">
         <b className="break-words">{user.full_name || "Sin nombre"}</b><span className="break-all">{user.email || "Sin email"}</span><span>{user.role}</span>
         <span className="font-semibold">{!user.active ? "Inactivo" : user.pending_invitation ? "Invitación pendiente" : "Activo"}</span>
-        <span>{personName(user.person_id)}</span><span>{user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString("es-MX") : "No disponible"}</span>
-        <div className="flex flex-wrap gap-2"><button disabled={busy} onClick={() => { setForm({ ...user, full_name: user.full_name || "", email: user.email || "", person_id: user.person_id || "" }); setError(""); }}>Editar</button><button disabled={busy} onClick={() => toggle(user)}>{user.active ? "Desactivar" : "Reactivar"}</button></div>
+        <span>{personName(user.person_id)}<br/><span className="text-xs text-slate-500">{user.phone_contact || "Sin celular"} · {user.phone_verified_at ? "Verificado" : "No verificado"}</span></span><span>{user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString("es-MX") : "No disponible"}</span>
+        <div className="flex flex-wrap gap-2"><button disabled={busy} onClick={() => { setForm({ ...user, full_name: user.full_name || "", email: user.email || "", person_id: user.person_id || "", phone_contact: user.phone_contact || "", permission_overrides: user.permission_overrides || [] }); setError(""); }}>Editar</button><button disabled={busy} onClick={() => toggle(user)}>{user.active ? "Desactivar" : "Reactivar"}</button></div>
       </article>)}</div>
       {!users.length && <p className="py-4">No hay usuarios para mostrar.</p>}
       <div className="mt-5 flex items-center gap-3"><button disabled={page === 0 || busy} onClick={() => { setLoading(true); setError(""); setPage(page - 1); }}>Anterior</button><span>Página {page + 1} · {total} usuarios</span><button disabled={(page + 1) * 50 >= total || busy} onClick={() => { setLoading(true); setError(""); setPage(page + 1); }}>Siguiente</button></div>

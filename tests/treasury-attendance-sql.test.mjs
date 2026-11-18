@@ -29,14 +29,34 @@ test("treasury and attendance RPCs keep payments atomic, auditable, and unique",
     await db.exec("set role authenticated");
 
     const eventId = (await db.query("select create_fundraising_event($1,$2,$3,$4,$5) as id", ["Colecta", null, null, 100, [id(10), id(11)]])).rows[0].id;
-    const paymentId = (await db.query("select register_fundraising_payment($1,$2,$3,$4) as id", [eventId, id(10), 40, "2026-11-17"])).rows[0].id;
+    const requestId = id(500);
+    const paymentId = (await db.query("select register_fundraising_payment_once($1,$2,$3,$4,$5) as id", [eventId, id(10), requestId, 40, "2026-11-17"])).rows[0].id;
+    assert.equal((await db.query("select register_fundraising_payment_once($1,$2,$3,$4,$5) as id", [eventId, id(10), requestId, 40, "2026-11-17"])).rows[0].id, paymentId);
     assert.equal((await db.query("select count(*)::int as count from treasury_transactions where fundraising_payment_id=$1", [paymentId])).rows[0].count, 1);
+    assert.equal((await db.query("select count(*)::int as count from fundraising_payments where request_id=$1", [requestId])).rows[0].count, 1);
     await db.query("select update_fundraising_payment($1,$2,$3)", [paymentId, 120, "2026-11-16"]);
     assert.equal((await db.query("select amount from treasury_transactions where fundraising_payment_id=$1", [paymentId])).rows[0].amount, "120.00");
     await db.query("select void_fundraising_payment($1,$2)", [paymentId, "Pago duplicado corregido"]);
     assert.equal((await db.query("select status from treasury_transactions where fundraising_payment_id=$1", [paymentId])).rows[0].status, "voided");
     assert.equal((await db.query("select count(*)::int as count from treasury_audit where payment_id=$1", [paymentId])).rows[0].count, 3);
-    const otherPayment = (await db.query("select register_fundraising_payment($1,$2,$3,$4) as id", [eventId, id(11), 50, "2026-11-17"])).rows[0].id;
+    const otherPayment = (await db.query("select register_fundraising_payment_once($1,$2,$3,$4,$5) as id", [eventId, id(11), id(501), 50, "2026-11-17"])).rows[0].id;
+    const emptyEventId = (await db.query("select create_fundraising_event($1,$2,$3,$4,$5) as id", ["Nuevo", null, null, 100, []])).rows[0].id;
+    await db.query("select update_fundraising_event($1,$2,$3,$4,$5)", [emptyEventId, "Nuevo ajustado", null, null, 120]);
+    assert.equal((await db.query("select add_fundraising_participants($1,$2) as count", [emptyEventId, [id(10), id(11), id(10)]])).rows[0].count, 2);
+    assert.equal((await db.query("select add_fundraising_participants($1,$2) as count", [emptyEventId, [id(10)]])).rows[0].count, 0);
+    assert.equal((await db.query("select sum(required_amount) as total from fundraising_participants where event_id=$1", [emptyEventId])).rows[0].total, "240.00");
+    const fullId = (await db.query("select register_fundraising_payment_once($1,$2,$3,$4,$5) as id", [emptyEventId, id(10), id(502), null, "2026-11-17"])).rows[0].id;
+    assert.equal((await db.query("select amount from fundraising_payments where id=$1", [fullId])).rows[0].amount, "120.00");
+    await assert.rejects(db.query("select register_fundraising_payment_once($1,$2,$3,$4,$5)", [emptyEventId, id(10), id(503), null, "2026-11-17"]), /aportación ya completada/);
+    assert.equal((await db.query("select remove_fundraising_participant($1,$2) as result", [emptyEventId, id(11)])).rows[0].result, "removed");
+    assert.equal((await db.query("select add_fundraising_participants($1,$2) as count", [emptyEventId, [id(11)]])).rows[0].count, 1);
+    await db.query("select register_fundraising_payment_once($1,$2,$3,$4,$5)", [emptyEventId, id(11), id(505), 50, "2026-11-17"]);
+    const balancePayment = (await db.query("select register_fundraising_payment_once($1,$2,$3,$4,$5) as id", [emptyEventId, id(11), id(506), null, "2026-11-17"])).rows[0].id;
+    assert.equal((await db.query("select amount from fundraising_payments where id=$1", [balancePayment])).rows[0].amount, "70.00");
+    assert.equal((await db.query("select amount from treasury_transactions where fundraising_payment_id=$1", [balancePayment])).rows[0].amount, "70.00");
+    assert.equal((await db.query("select remove_fundraising_participant($1,$2) as result", [emptyEventId, id(10)])).rows[0].result, "cancelled");
+    assert.equal((await db.query("select status from fundraising_participants where event_id=$1 and server_id=$2", [emptyEventId, id(10)])).rows[0].status, "cancelled");
+    assert.equal((await db.query("select count(*)::int as count from treasury_transactions where fundraising_payment_id=$1", [fullId])).rows[0].count, 1);
 
     const transactionId = (await db.query("select create_treasury_transaction($1,$2,$3,$4,$5,$6,$7) as id",
       ["2026-11-17", "Compra", "salida", 30, "gasto", null, null])).rows[0].id;
@@ -60,14 +80,14 @@ test("treasury and attendance RPCs keep payments atomic, auditable, and unique",
     await db.exec("reset role");
     await db.query("select set_config('test.uid',$1,false)", [id(2)]);
     await db.exec("set role authenticated");
-    assert.equal((await db.query("select count(*)::int as count from fundraising_participants")).rows[0].count, 1);
+    assert.equal((await db.query("select count(*)::int as count from fundraising_participants")).rows[0].count, 2);
     assert.equal((await db.query("select app_private.is_linked_server($1) as linked", [id(10)])).rows[0].linked, true);
     assert.equal((await db.query("select * from treasury_transactions")).rows.length, 0);
-    assert.deepEqual((await db.query("select id from fundraising_payments order by id")).rows.map((row) => row.id), [paymentId]);
-    assert.equal((await db.query("select * from fundraising_events")).rows.length, 1);
+    assert.deepEqual((await db.query("select id from fundraising_payments order by id")).rows.map((row) => row.id), [paymentId, fullId].sort());
+    assert.equal((await db.query("select * from fundraising_events")).rows.length, 2);
     assert.deepEqual((await db.query("select status from attendance_records")).rows.map((row) => row.status), ["present"]);
     assert.equal((await db.query("select * from activity_participants")).rows.length, 1);
-    await assert.rejects(db.query("select register_fundraising_payment($1,$2,$3,$4)", [eventId, id(10), 20, "2026-11-17"]), /No autorizado/);
+    await assert.rejects(db.query("select register_fundraising_payment_once($1,$2,$3,$4,$5)", [eventId, id(10), id(504), 20, "2026-11-17"]), /No autorizado/);
     await assert.rejects(db.query("select update_fundraising_payment($1,$2,$3)", [otherPayment, 99, "2026-11-17"]), /No autorizado/);
   } finally {
     await db.close();

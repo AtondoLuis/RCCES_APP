@@ -33,7 +33,7 @@ function harness(role = 'ADMIN', active = true) {
     { id: uuid(3), role: 'ADMIN', active: true, parish_id: uuid(11), full_name: 'Foreign', email: 'foreign@example.test' },
   ];
   const records = { profiles, people: [{ id: uuid(20), parish_id: uuid(10), first_name: 'Juan', last_name: 'Perez' }, { id: uuid(21), parish_id: uuid(11), first_name: 'Ana', last_name: 'Other' }] };
-  const calls = [], invitations = [];
+  const calls = [], invitations = [], authUsers = [];
   function from(table) {
     const call = { table, filters: [], patch: null, insert: null, range: null }; calls.push(call);
     function result(single) {
@@ -44,17 +44,29 @@ function harness(role = 'ADMIN', active = true) {
       if (call.range) rows = rows.slice(call.range[0],call.range[1]+1);
       return { data: single ? rows[0] ?? null : rows, error: null, count };
     }
-    return { select() { return this; }, eq(k,v) { call.filters.push([k,v]); return this; }, order() { return this; }, limit() { return this; }, range(a,b) { call.range=[a,b]; return this; },
+    return { select() { return this; }, eq(k,v) { call.filters.push([k,v]); return this; }, in(k,values) { call.filters.push([k,values]); return this; }, order() { return this; }, limit() { return this; }, range(a,b) { call.range=[a,b]; return this; },
       update(patch) { call.patch = patch; return this; }, insert(row) { call.insert=row; return this; }, maybeSingle() { return Promise.resolve(result(true)); },
       then(ok,bad) { return Promise.resolve(result(false)).then(ok,bad); } };
   }
-  const client = { from, auth: { getUser: async () => ({ data: { user: role ? { id: uuid(1), user_metadata: { role: 'ADMIN', parish_id: uuid(11) } } : null }, error: null }) } };
+  const rpc = async (name,args) => {
+    if (name === 'admin_update_app_user') {
+      const target = profiles.find((profile) => profile.id === args.p_profile_id && profile.parish_id === uuid(10));
+      if (!target) return { data: null, error: null };
+      Object.assign(target, { full_name: args.p_full_name, role: args.p_role, active: args.p_active, person_id: args.p_person_id, phone_contact: args.p_phone_contact });
+      if (args.p_permission_overrides !== null) target.permission_overrides = args.p_permission_overrides;
+      return { data: target.id, error: null };
+    }
+    if (name === 'has_app_permission') return { data: args.p_permission === 'commissions.manage' && ['ADMIN','COORDINADOR','COORDINADOR_LITURGIA'].includes(role), error: null };
+    return { data: null, error: null };
+  };
+  const client = { from, rpc, auth: { getUser: async () => ({ data: { user: role ? { id: uuid(1), user_metadata: { role: 'ADMIN', parish_id: uuid(11) } } : null }, error: null }) } };
   const admin = { from, auth: { admin: {
+    listUsers: async ({ page, perPage }) => ({ data: { users: authUsers.slice((page - 1) * perPage, page * perPage) }, error: null }),
     getUserById: async (id) => ({ data: { user: { id, invited_at: '2026-10-17T12:00:00Z' } }, error: null }),
     inviteUserByEmail: async (email, options) => { invitations.push({ email, options }); return { data: { user: { id: uuid(50) } }, error: null }; },
   } } };
   const load = loader({ '@/lib/supabase/server': { createClient: async () => client }, '@/lib/supabase/admin': { createAdminClient: () => admin }, '@supabase/ssr': { createServerClient: () => client } }, { SUPABASE_SERVICE_ROLE_KEY: 'test-only', APP_URL: 'https://rcces.example', NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co', NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'test-public' });
-  return { profiles, records, calls, invitations, client, load,
+  return { profiles, records, calls, invitations, authUsers, client, load,
     route: load('src/app/api/admin/usuarios/route.ts'), access: load('src/lib/admin-access.ts') };
 }
 const body = (patch = {}) => ({ email: 'new@example.test', full_name: 'New User', role: 'LECTOR', active: true, person_id: null, ...patch });
@@ -76,6 +88,23 @@ test('ADMIN invitation uses only trusted parish and prepares linked profile', as
   assert.equal(h.invitations[0].options.redirectTo,'https://rcces.example/auth/callback');
   assert.deepEqual(Object.keys(h.invitations[0].options.data),['full_name']);
 });
+test('existing Supabase Auth account is linked without a second invitation or account', async () => {
+  const h=harness(); h.authUsers.push({ id:uuid(55), email:'existing@example.test' });
+  const values=body({ email:'Existing@Example.Test', person_id:uuid(20), phone_contact:'6641234567' });
+  const response=await h.route.POST(request('POST',values));
+  assert.equal(response.status,201);
+  assert.deepEqual(await response.json(),{ id:uuid(55), linked:true });
+  assert.equal(h.invitations.length,0);
+  assert.equal(h.profiles.filter((profile)=>profile.id===uuid(55)).length,1);
+  assert.equal(h.records.profiles.find((profile)=>profile.id===uuid(55)).phone_contact,'+526641234567');
+});
+test('an Auth account already profiled elsewhere is not re-linked or exposed', async () => {
+  const h=harness(); h.authUsers.push({ id:uuid(3), email:'foreign@example.test' });
+  const response=await h.route.POST(request('POST',body({ email:'foreign@example.test' })));
+  assert.equal(response.status,409);
+  assert.match((await response.json()).error,/ya está vinculada/);
+  assert.equal(h.invitations.length,0);
+});
 test('arbitrary parish payload, foreign person and nonadmin invites are rejected before Auth admin API', async () => {
   const h = harness();
   assert.equal((await h.route.POST(request('POST',body({ parish_id: uuid(11) })))).status,400);
@@ -92,6 +121,17 @@ test('editing is tenant scoped and cannot change email or parish', async () => {
   assert.equal((await h.route.PATCH(request('PATCH',{ ...values,email:'changed@example.test' }))).status,400);
   assert.equal((await h.route.PATCH(request('PATCH',{ ...values,parish_id:uuid(11) }))).status,400);
 });
+test('phone contact is normalized to Mexico E.164 and self-permission changes are rejected', async () => {
+  const h=harness();
+  const values=body({ id:uuid(2), full_name:'Linked server', role:'SERVIDOR', person_id:uuid(20), phone_contact:'(664) 123-4567',
+    permission_overrides:[{ permission_key:'treasury.view', allowed:true }] });
+  delete values.email;
+  assert.equal((await h.route.PATCH(request('PATCH',values))).status,200);
+  assert.equal(h.profiles[1].phone_contact,'+526641234567');
+  assert.deepEqual(h.profiles[1].permission_overrides,values.permission_overrides);
+  assert.equal((await h.route.PATCH(request('PATCH',{ ...values, phone_contact:'+1 415 555 0100' }))).status,400);
+  assert.equal((await h.route.PATCH(request('PATCH',{ ...values, id:uuid(1), person_id:null }))).status,400);
+});
 test('profile/person association cannot be duplicated', async () => {
   const h = harness(); h.profiles[1].person_id=uuid(20);
   assert.equal((await h.route.POST(request('POST',body({ person_id:uuid(20) })))).status,409);
@@ -104,6 +144,18 @@ test('inactive accounts are denied and reactivated accounts regain app access', 
   const p = h.load('src/lib/permissions.ts');
   assert.equal(p.canUseApp({ role:'LECTOR',active:false,parish_id:uuid(10) }),false);
   assert.equal(p.canUseApp({ role:'LECTOR',active:true,parish_id:uuid(10) }),true);
+});
+test('SERVIDOR role gets only personal commission and portal routes by default', () => {
+  const permissions=harness().load('src/lib/permissions.ts');
+  const profile={ role:'SERVIDOR',active:true,parish_id:uuid(10) };
+  assert.equal(permissions.canUseApp(profile),true);
+  assert.equal(permissions.canAccessPath(profile.role,'/portal'),true);
+  assert.equal(permissions.canAccessPath(profile.role,'/comisiones'),true);
+  assert.equal(permissions.canAccessPath(profile.role,'/servidores'),false);
+  assert.equal(permissions.canAccessPath(profile.role,'/asistencias'),false);
+  assert.equal(permissions.canAccessPath(profile.role,'/tesoreria'),false);
+  assert.equal(permissions.canViewCommission(profile.role,'published'),true);
+  assert.equal(permissions.canViewCommission(profile.role,'draft'),false);
 });
 test('CSRF origin, invalid JSON and unknown fields fail closed', async () => {
   const h = harness();

@@ -41,6 +41,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [role, setRole] = useState<Role>("LECTOR");
+  const [canManageCommissionOverride, setCanManageCommissionOverride] = useState(false);
   const [parish, setParish] = useState<Parish>({ id: parishId, name: "Parroquia", logo_url: null, patron_image_url: null, address: null, phone: null });
   const [settings, setSettings] = useState<SettingsRow>(blankSettings);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -55,7 +56,7 @@ export default function Dashboard() {
   const [originalStatus, setOriginalStatus] = useState("draft");
   const [query, setQuery] = useState("");
   const [saved, setSaved] = useState("Cambios pendientes");
-  const canEdit = permissionsFor(role).editCommissions;
+  const canEdit = permissionsFor(role).editCommissions || canManageCommissionOverride;
   const canEditCurrent = canEdit && (originalStatus !== "finished" || permissionsFor(role).reopenCompleted);
   const canAdmin = permissionsFor(role).manageConfiguration;
   const massId = pathname.match(/^\/comisiones\/([^/]+)/)?.[1];
@@ -69,9 +70,13 @@ export default function Dashboard() {
     if (profileRes.error || !profileRes.data?.active || !profileRes.data.parish_id) { setError("No se pudo verificar el perfil activo."); setLoading(false); return; }
     const currentRole = profileRes.data.role as Role;
     const ownerParishId = profileRes.data.parish_id as string;
+    const commissionPermission = await supabase.rpc("has_app_permission", { p_permission: "commissions.manage" });
+    if (commissionPermission.error) { setError(commissionPermission.error.message); setLoading(false); return; }
+    const canManageByPermission = commissionPermission.data === true;
+    setCanManageCommissionOverride(canManageByPermission);
     setRole(currentRole);
     let massQuery = supabase.from("masses").select("*").eq("parish_id", ownerParishId);
-    if (!permissionsFor(currentRole).editCommissions) massQuery = massQuery.eq("status", "published");
+    if (!permissionsFor(currentRole).editCommissions && !canManageByPermission) massQuery = massQuery.eq("status", "published");
     const [parishRes, catRes, svcRes, peopleRes, timesRes, settingsRes, massesRes, availabilityRes] = await Promise.all([
       supabase.from("parishes").select("*").eq("id", ownerParishId).single(),
       supabase.from("service_categories").select("*").order("display_order"),
@@ -175,8 +180,31 @@ export default function Dashboard() {
 
 export function Shell({ children, role, patronImageUrl, onLogout }: { children: React.ReactNode; role: Role; patronImageUrl?: string | null; onLogout?: () => void }) {
   const currentPath = usePathname() || "/";
-  const nav = [["/comisiones", "Comisiones"], ["/servidores", "Servidores"], ["/tesoreria", "Tesorería"], ["/aportaciones", "Aportaciones"], ["/asistencias", "Asistencias"], ["/admin/servicios", "Servicios"], ["/admin/horarios", "Horarios"], ["/admin/parroquia", "Parroquia"], ["/admin/configuracion", "Configuración"], ["/admin/usuarios", "Usuarios"]].filter(([href]) => canAccessPath(role, href));
-  return <div className="min-h-screen bg-[#f7f8fa] text-slate-900"><header className="sticky top-0 z-20 border-b border-slate-200 bg-white print:hidden"><div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-2 px-4 py-2 sm:px-8"><Link href="/" className="inline-flex max-w-full min-w-0 items-center gap-2 font-serif text-xl font-bold text-[#13263d]"><HeaderPatronImage key={patronImageUrl ?? ""} src={patronImageUrl}/><span>Santo Toribio Romo</span></Link><nav className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-600">{nav.map(([href, name]) => <Link key={href} href={href} className={`nav-link ${currentPath === href || currentPath.startsWith(`${href}/`) ? "nav-link-active" : ""}`}>{name}</Link>)}<span className="status-pill">{role}</span>{onLogout && <button onClick={onLogout} className="border border-slate-300 bg-white text-slate-700 hover:border-[#13263d] hover:text-[#13263d]" aria-label="Salir"><LogOut size={17}/></button>}</nav></div></header><main className="mx-auto max-w-[1440px] px-4 py-7 sm:px-8 print:p-0">{children}</main></div>;
+  const supabase = useMemo(() => createClient(), []);
+  const [extraPermissions, setExtraPermissions] = useState<Set<string>>(new Set());
+  const [permissionError, setPermissionError] = useState("");
+  useEffect(() => {
+    if (!supabase) return;
+    let active = true;
+    void Promise.all(["portal.view", "commissions.view_own", "treasury.view", "attendance.manage", "attendance.view_all", "notices.manage", "users.manage_permissions"].map((permission) =>
+      supabase.rpc("has_app_permission", { p_permission: permission }).then((result) => ({ permission, ...result })),
+    )).then((results) => {
+      if (!active) return;
+      const failed = results.find((result) => result.error);
+      if (failed?.error) { setPermissionError(failed.error.message); return; }
+      setExtraPermissions(new Set(results.filter((result) => result.data === true).map((result) => result.permission)));
+    });
+    return () => { active = false; };
+  }, [supabase]);
+  const allNav: [string, string][] = [["/portal", "Mi portal"], ["/comisiones", "Comisiones"], ["/servidores", "Servidores"], ["/admin/tesoreria", "Tesorería"], ["/asistencias", "Asistencias"], ["/admin/avisos", "Avisos"], ["/admin/usuarios/permisos", "Permisos de usuarios"], ["/admin/servicios", "Servicios"], ["/admin/horarios", "Horarios"], ["/admin/parroquia", "Parroquia"], ["/admin/configuracion", "Configuración"], ["/admin/usuarios", "Usuarios"]];
+  const nav = allNav.filter(([href]) => href === "/portal" ? extraPermissions.has("portal.view")
+    : href === "/comisiones" && role === "SERVIDOR" ? extraPermissions.has("commissions.view_own")
+    : canAccessPath(role, href)
+    || (href === "/admin/tesoreria" && extraPermissions.has("treasury.view"))
+    || (href === "/asistencias" && (extraPermissions.has("attendance.manage") || extraPermissions.has("attendance.view_all")))
+    || (href === "/admin/avisos" && extraPermissions.has("notices.manage"))
+    || (href === "/admin/usuarios/permisos" && extraPermissions.has("users.manage_permissions")));
+  return <div className="min-h-screen bg-[#f7f8fa] text-slate-900"><header className="sticky top-0 z-20 border-b border-slate-200 bg-white print:hidden"><div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-2 px-4 py-2 sm:px-8"><Link href="/" className="inline-flex max-w-full min-w-0 items-center gap-2 font-serif text-xl font-bold text-[#13263d]"><HeaderPatronImage key={patronImageUrl ?? ""} src={patronImageUrl}/><span>Santo Toribio Romo</span></Link><nav className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-600">{nav.map(([href, name]) => <Link key={href} href={href} className={`nav-link ${currentPath === href || currentPath.startsWith(`${href}/`) ? "nav-link-active" : ""}`}>{name}</Link>)}<span className="status-pill">{role}</span>{onLogout && <button onClick={onLogout} className="border border-slate-300 bg-white text-slate-700 hover:border-[#13263d] hover:text-[#13263d]" aria-label="Salir"><LogOut size={17}/></button>}</nav></div>{permissionError && <p role="alert" className="mx-auto max-w-[1440px] px-4 pb-2 text-xs text-red-700 sm:px-8">No se pudieron cargar algunos permisos de menú: {permissionError}</p>}</header><main className="mx-auto max-w-[1440px] px-4 py-7 sm:px-8 print:p-0">{children}</main></div>;
 }
 function HeaderPatronImage({ src }: { src?: string | null }) {
   const [loaded, setLoaded] = useState(false);
@@ -356,7 +384,7 @@ function PeopleView({ parishId, canEdit, personId, people, services, categories,
   }
   return <section className="card-panel p-5">
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h1 className="text-2xl font-bold">{personId === "nuevo" ? "Crear servidor" : "Servidor"}</h1>{editing && canEdit && <Link className="button-link border border-slate-300 bg-white text-sm text-slate-700 hover:border-[#13263d] hover:text-[#13263d]" href={`/servidores/${editing.id}/editar`}>Editar</Link>}</div>
-    {editing && personId !== "nuevo" && <div className="mb-5 flex flex-wrap gap-2"><Link className="button-link border bg-white" href="/asistencias">Asistencias</Link><Link className="button-link border bg-white" href="/aportaciones">Aportaciones</Link></div>}
+    {editing && personId !== "nuevo" && <div className="mb-5 flex flex-wrap gap-2"><Link className="button-link border bg-white" href="/asistencias">Asistencias</Link><Link className="button-link border bg-white" href="/admin/tesoreria">Aportaciones</Link></div>}
     <div className="grid gap-4 sm:grid-cols-2">
       <Field label="Nombre"><input disabled={!canEdit} value={form.first_name} onChange={(event) => setForm({ ...form, first_name: event.target.value })}/></Field>
       <Field label="Apellidos"><input disabled={!canEdit} value={form.last_name} onChange={(event) => setForm({ ...form, last_name: event.target.value })}/></Field>

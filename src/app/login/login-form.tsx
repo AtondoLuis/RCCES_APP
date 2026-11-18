@@ -25,12 +25,12 @@ export default function LoginForm() {
       return;
     }
     const { data: auth } = await supabase.auth.getUser();
-    const { data: profile, error: profileError } = await supabase.from("profiles").select("active,parish_id").eq("id", auth.user?.id ?? "").maybeSingle();
+    const { data: profile, error: profileError } = await supabase.from("profiles").select("active,parish_id,role").eq("id", auth.user?.id ?? "").maybeSingle();
     if (profileError || !profile?.active || !profile.parish_id) {
       await supabase.auth.signOut();
       setError(profileError ? "No se pudo verificar tu perfil." : "Tu acceso est\u00e1 desactivado o no tienes un perfil autorizado."); return;
     }
-    router.replace("/comisiones");
+    router.replace(profile.role === "SERVIDOR" ? "/portal" : "/comisiones");
     router.refresh();
   }
 
@@ -40,7 +40,7 @@ export default function LoginForm() {
         <div className="mb-6">
           <p className="text-sm font-extrabold uppercase tracking-wide text-[#9a7438]">RCCES</p>
           <h1 className="mt-1 text-2xl font-black text-[#13263d]">Iniciar sesión</h1>
-          <p className="mt-2 text-sm text-slate-600">Accede con tu correo y contraseña para gestionar comisiones.</p>
+          <p className="mt-2 text-sm text-slate-600">Accede con tu correo y contraseña para consultar tu portal o las herramientas autorizadas.</p>
         </div>
         <label className="mb-4 block">
           <span>Email</span>
@@ -50,6 +50,7 @@ export default function LoginForm() {
           <span>Contraseña</span>
           <input className="mt-1" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
         </label>
+        <p className="mb-4 text-xs text-slate-500">El celular registrado en tu perfil es solo de contacto; no se usa para iniciar sesión ni se verifica por SMS.</p>
         {error && <p className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
         <button className="w-full bg-[#13263d] text-white hover:bg-[#1d3a5b]" type="submit">
           <LogIn /> Entrar

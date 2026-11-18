@@ -1,3 +1,5 @@
-﻿import LoginForm from "./login-form";
-export default function LoginPage() { return <LoginForm />; }
+import DualLoginForm from './dual-login-form';
 
+export default function LoginPage() {
+  return <DualLoginForm />;
+}

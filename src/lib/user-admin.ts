@@ -1,12 +1,31 @@
 import "server-only";
 import { z } from "zod";
-import { APP_ROLES } from "@/lib/permissions";
+import { APP_PERMISSIONS, APP_PERMISSION_KEYS, APP_ROLES } from "@/lib/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AccessError, type requireAdmin } from "@/lib/admin-access";
+const phoneContact = z.union([z.string().trim().max(40), z.null()]).optional().transform((value) => {
+  if (value === undefined || value === null || value === "") return null;
+  const digits = value.replace(/\D/g, "");
+  const national = digits.length === 13 && digits.startsWith("521") ? digits.slice(3)
+    : digits.length === 12 && digits.startsWith("52") ? digits.slice(2)
+    : digits.length === 10 ? digits : "";
+  return national.length === 10 ? `+52${national}` : "__invalid_phone__";
+}).pipe(z.union([z.null(), z.string().regex(/^\+52[0-9]{10}$/, "Ingresa un celular mexicano de 10 dígitos.")]));
+const permissionOverrides = z.array(z.object({
+  permission_key: z.enum(APP_PERMISSION_KEYS),
+  allowed: z.boolean(),
+}).strict()).max(APP_PERMISSIONS.length).optional().superRefine((overrides, context) => {
+  if (!overrides) return;
+  const keys = new Set<string>();
+  for (const override of overrides) {
+    if (keys.has(override.permission_key)) context.addIssue({ code: "custom", message: "Permiso duplicado." });
+    keys.add(override.permission_key);
+  }
+});
 const fields = { full_name: z.string().trim().min(1).max(150), role: z.enum(APP_ROLES),
-  active: z.boolean(), person_id: z.guid().nullable() };
+  active: z.boolean(), person_id: z.guid().nullable(), phone_contact: phoneContact };
 const inviteSchema = z.object({ ...fields, active: z.boolean().default(true), person_id: z.union([z.guid(), z.literal(""), z.null()]).optional().transform((value) => value || null), email: z.string().trim().email().max(254).transform((s) => s.toLowerCase()) }).strict();
-const updateSchema = z.object({ ...fields, id: z.string().uuid() }).strict();
+const updateSchema = z.object({ ...fields, permission_overrides: permissionOverrides, id: z.string().uuid() }).strict();
 type Context = Awaited<ReturnType<typeof requireAdmin>>;
 function dbError(error: { code?: string } | null) {
   if (!error) return;
@@ -25,6 +44,15 @@ async function validatePerson(context: Context, personId: string | null, targetI
 function authAdmin() {
   try { return createAdminClient(); } catch { throw new AccessError(503, "Falta configurar la clave de administracion en el servidor."); }
 }
+async function findAuthUserByEmail(admin: ReturnType<typeof authAdmin>, email: string) {
+  for (let page = 1; ; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new AccessError(503, "No se pudo verificar si el correo ya tiene una cuenta.");
+    const user = data.users.find((item) => item.email?.toLowerCase() === email);
+    if (user) return user;
+    if (data.users.length < 1000) return null;
+  }
+}
 async function listParishPeople(context: Context) {
   const people: { id: string; first_name: string; last_name: string; display_name: string | null }[] = [];
   for (let from = 0; ; from += 500) {
@@ -38,19 +66,29 @@ async function listParishPeople(context: Context) {
 export async function listAppUsers(context: Context, page = 0) {
   const start = Math.max(0, Math.min(page, 10000)) * 50;
   const [profiles, people] = await Promise.all([
-    context.client.from("profiles").select("id,full_name,email,role,active,person_id", { count: "exact" }).eq("parish_id", context.profile.parish_id).order("created_at").order("id").range(start, start + 49),
+    context.client.from("profiles").select("id,full_name,email,role,active,person_id,phone_contact,phone_verified_at", { count: "exact" }).eq("parish_id", context.profile.parish_id).order("created_at").order("id").range(start, start + 49),
     listParishPeople(context),
   ]);
   if (profiles.error) throw new AccessError(503, "No se pudo cargar usuarios y servidores.");
+  const ids = (profiles.data ?? []).map((profile) => profile.id);
+  const overrides = ids.length ? await context.client.from("profile_permission_overrides")
+    .select("profile_id,permission_key,allowed").in("profile_id", ids) : { data: [], error: null };
+  if (overrides.error) throw new AccessError(503, "No se pudieron cargar los permisos de usuarios. Revisa las migraciones.");
+  const permissionMap = new Map<string, { permission_key: string; allowed: boolean }[]>();
+  for (const override of overrides.data ?? []) {
+    permissionMap.set(override.profile_id, [...(permissionMap.get(override.profile_id) ?? []), {
+      permission_key: override.permission_key, allowed: override.allowed,
+    }]);
+  }
   const admin = process.env.SUPABASE_SERVICE_ROLE_KEY ? authAdmin() : null;
   const users = await Promise.all((profiles.data ?? []).map(async (profile) => {
-    if (!admin) return { ...profile, last_sign_in_at: null, pending_invitation: null };
+    if (!admin) return { ...profile, permission_overrides: permissionMap.get(profile.id) ?? [], last_sign_in_at: null, pending_invitation: null };
     const { data, error } = await admin.auth.admin.getUserById(profile.id);
     if (error) throw new AccessError(503, "No se pudo consultar el estado de acceso de los usuarios.");
-    return { ...profile, last_sign_in_at: data.user.last_sign_in_at ?? null,
+    return { ...profile, permission_overrides: permissionMap.get(profile.id) ?? [], last_sign_in_at: data.user.last_sign_in_at ?? null,
       pending_invitation: !!data.user.invited_at && !data.user.last_sign_in_at && !data.user.email_confirmed_at };
   }));
-  return { users, people, total: profiles.count ?? 0, invitationsConfigured: !!admin };
+  return { users, people, total: profiles.count ?? 0, invitationsConfigured: !!admin, actorId: context.actorId };
 }
 export async function inviteAppUser(context: Context, body: unknown) {
   const parsed = inviteSchema.safeParse(body);
@@ -62,6 +100,7 @@ export async function inviteAppUser(context: Context, body: unknown) {
       : field === "role" ? "Selecciona un rol valido."
       : field === "person_id" ? "Selecciona un servidor valido de la lista o deja Sin vincular."
       : field === "active" ? "El estado del usuario debe ser valido."
+      : field === "phone_contact" ? "Ingresa un celular mexicano de 10 dígitos o deja el campo vacío."
       : "La solicitud contiene campos no permitidos; no envies parroquia.";
     throw new AccessError(400, detail);
   }
@@ -70,31 +109,47 @@ export async function inviteAppUser(context: Context, body: unknown) {
   const duplicate = await context.client.from("profiles").select("id").eq("parish_id", context.profile.parish_id).eq("email", input.email).maybeSingle();
   dbError(duplicate.error);
   if (duplicate.data) throw new AccessError(409, "Este usuario ya tiene acceso a la parroquia.");
+  const admin = authAdmin();
+  const existingAuthUser = await findAuthUserByEmail(admin, input.email);
+  if (existingAuthUser) {
+    const existingProfile = await admin.from("profiles").select("id").eq("id", existingAuthUser.id).maybeSingle();
+    dbError(existingProfile.error);
+    if (existingProfile.data) throw new AccessError(409, "La cuenta ya está vinculada. No se creó otro usuario.");
+    const inserted = await admin.from("profiles").insert({ id: existingAuthUser.id, parish_id: context.profile.parish_id,
+      email: input.email, full_name: input.full_name, role: input.role, active: input.active, person_id: input.person_id, phone_contact: input.phone_contact });
+    if (inserted.error) throw new AccessError(503, "No se pudo vincular la cuenta existente. No se modificó la cuenta de Auth.");
+    return { id: existingAuthUser.id, linked: true };
+  }
   const configured = process.env.APP_URL || (process.env.NODE_ENV !== "production" ? "http://localhost:3100" : "");
   let site: URL;
   try { site = new URL(configured); } catch { throw new AccessError(503, "Configura APP_URL en el servidor para las invitaciones."); }
   if (site.protocol !== "https:" && !(site.protocol === "http:" && ["localhost", "127.0.0.1"].includes(site.hostname))) throw new AccessError(503, "APP_URL debe usar HTTPS.");
-  const admin = authAdmin();
   const { data, error } = await admin.auth.admin.inviteUserByEmail(input.email, {
     data: { full_name: input.full_name }, redirectTo: new URL("/auth/callback", site.origin).href,
   });
   if (error || !data.user) throw new AccessError(400, "No se pudo enviar la invitacion. El correo puede estar registrado; verifica la configuracion de Auth.");
   // Never overwrite an existing profile or accept role/parish from user_metadata.
   const inserted = await admin.from("profiles").insert({ id: data.user.id, parish_id: context.profile.parish_id,
-    email: input.email, full_name: input.full_name, role: input.role, active: input.active, person_id: input.person_id });
+    email: input.email, full_name: input.full_name, role: input.role, active: input.active, person_id: input.person_id, phone_contact: input.phone_contact });
   if (inserted.error) throw new AccessError(503, "La invitacion se envio, pero no se pudo preparar el perfil. El acceso queda bloqueado hasta que un administrador repare el perfil.");
   return { id: data.user.id };
 }
 export async function updateAppUser(context: Context, body: unknown) {
   const parsed = updateSchema.safeParse(body);
   if (!parsed.success) throw new AccessError(400, "Datos invalidos. El email y la parroquia no se pueden modificar aqui.");
-  const { id, ...patch } = parsed.data;
+  const { id, permission_overrides, ...patch } = parsed.data;
   const target = await context.client.from("profiles").select("id").eq("id", id).eq("parish_id", context.profile.parish_id).maybeSingle();
   dbError(target.error);
   if (!target.data) throw new AccessError(404, "Usuario no encontrado en tu parroquia.");
   await validatePerson(context, patch.person_id, id);
-  const result = await context.client.from("profiles").update(patch).eq("id", id).eq("parish_id", context.profile.parish_id).select("id").maybeSingle();
+  if (permission_overrides !== undefined && id === context.actorId) throw new AccessError(400, "No puedes modificar tus propios permisos.");
+  const result = await context.client.rpc("admin_update_app_user", {
+    p_profile_id: id, p_full_name: patch.full_name, p_role: patch.role, p_active: patch.active,
+    p_person_id: patch.person_id, p_phone_contact: patch.phone_contact,
+    p_permission_overrides: permission_overrides ?? null,
+  });
   dbError(result.error);
+  if (result.error) throw new AccessError(503, "No se pudo guardar el usuario. Revisa las migraciones y los permisos.");
   if (!result.data) throw new AccessError(404, "Usuario no encontrado en tu parroquia.");
-  return result.data;
+  return { id: result.data };
 }
