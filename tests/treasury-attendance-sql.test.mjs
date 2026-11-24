@@ -73,6 +73,16 @@ test("treasury and attendance RPCs keep payments atomic, auditable, and unique",
     await db.query("insert into activity_participants(activity_id,server_id) values($1,$2),($1,$3)", [activityId, id(10), id(11)]);
     await db.query("select toggle_attendance($1,$2,true)", [activityId, id(10)]);
     await db.query("select close_attendance_capture($1)", [activityId]);
+    const editedActivity = await db.query(
+      `update community_activities
+        set name='Asamblea corregida', activity_date='2026-11-18', start_time='20:00', updated_by=auth.uid(), updated_at=now()
+        where id=$1 and parish_id=$2
+        returning name, activity_date::text, start_time::text, status, capture_status, updated_by`,
+      [activityId, id(100)]);
+    assert.deepEqual(editedActivity.rows, [{
+      name: "Asamblea corregida", activity_date: "2026-11-18", start_time: "20:00:00",
+      status: "completed", capture_status: "closed", updated_by: id(1),
+    }]);
     const statuses = await db.query("select status from attendance_records where activity_id=$1 order by server_id", [activityId]);
     assert.deepEqual(statuses.rows.map((row) => row.status), ["present", "absent"]);
     await assert.rejects(db.query("select toggle_attendance($1,$2,false)", [activityId, id(10)]), /captura ya fue cerrada/);
@@ -87,6 +97,7 @@ test("treasury and attendance RPCs keep payments atomic, auditable, and unique",
     assert.equal((await db.query("select * from fundraising_events")).rows.length, 2);
     assert.deepEqual((await db.query("select status from attendance_records")).rows.map((row) => row.status), ["present"]);
     assert.equal((await db.query("select * from activity_participants")).rows.length, 1);
+    assert.equal((await db.query("update community_activities set name='Cambio no autorizado' where id=$1 returning id", [activityId])).rows.length, 0);
     await assert.rejects(db.query("select register_fundraising_payment_once($1,$2,$3,$4,$5)", [eventId, id(10), id(504), 20, "2026-11-17"]), /No autorizado/);
     await assert.rejects(db.query("select update_fundraising_payment($1,$2,$3)", [otherPayment, 99, "2026-11-17"]), /No autorizado/);
   } finally {

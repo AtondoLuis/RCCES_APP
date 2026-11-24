@@ -1,5 +1,5 @@
-import TreasuryPage from "@/app/tesoreria/page";
+import Treasury from "@/components/treasury";
 
 export default function Page() {
-  return <TreasuryPage />;
+  return <Treasury />;
 }
