@@ -22,12 +22,13 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getUser();
   const isLogin = request.nextUrl.pathname.startsWith("/login");
   const isCallback = request.nextUrl.pathname === "/auth/callback";
-  const isInternal = !isCallback && !isLogin && !request.nextUrl.pathname.startsWith("/_next") && request.nextUrl.pathname !== "/favicon.ico";
+  const isInvitationFlow = request.nextUrl.pathname === "/aceptar-invitacion" || request.nextUrl.pathname === "/api/auth/accept-invitation";
+  const isInternal = !isCallback && !isLogin && !isInvitationFlow && !request.nextUrl.pathname.startsWith("/_next") && request.nextUrl.pathname !== "/favicon.ico";
   if (isInternal && !data.user) {
     if (request.nextUrl.pathname.startsWith("/api/")) return NextResponse.json({ error: "Inicia sesion para continuar." }, { status: 401 });
     return NextResponse.redirect(new URL("/login", request.url));
   }
-  if (data.user && !isCallback) {
+  if (data.user && !isCallback && !isInvitationFlow) {
     const { data: profile, error } = await supabase.from("profiles").select("role,active,parish_id").eq("id", data.user.id).maybeSingle();
     if (error) return new NextResponse("No se pudo verificar el acceso. Revisa la migracion de usuarios.", { status: 503 });
     if (!canUseApp(profile)) {
