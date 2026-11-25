@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogIn, Smartphone } from "lucide-react";
+import { Eye, EyeOff, LogIn, Smartphone } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 type Method = "email" | "phone";
@@ -24,6 +24,7 @@ export default function DualLoginForm() {
   const [phone, setPhone] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function redirectByProfile(loginMethod: Method) {
     if (!supabase) throw new Error("Supabase no está configurado.");
@@ -99,11 +100,11 @@ export default function DualLoginForm() {
       </div>
       {method === "phone" ? <form onSubmit={submitPhone}>
         <label className="mb-4 block"><span>Celular mexicano</span><input className="mt-1 w-full" type="tel" inputMode="numeric" placeholder="+52 664 123 4567" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" required /></label>
-        <label className="mb-5 block"><span>Contraseña</span><input className="mt-1 w-full" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /></label>
+        <label className="mb-5 block"><span>Contraseña</span><div className="relative mt-1"><input className="w-full pr-12" type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /><button type="button" className="absolute inset-y-0 right-2 my-auto grid h-10 w-10 place-items-center" aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"} aria-pressed={showPassword} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={20} /> : <Eye size={20} />}</button></div></label>
         <button disabled={busy} className="w-full bg-[#13263d] text-white hover:bg-[#1d3a5b]" type="submit"><LogIn /> {busy ? "Validando..." : "Entrar"}</button>
       </form> : <form onSubmit={submitEmail}>
         <label className="mb-4 block"><span>Email del ADMIN</span><input className="mt-1 w-full" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required /></label>
-        <label className="mb-5 block"><span>Contraseña</span><input className="mt-1 w-full" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /></label>
+        <label className="mb-5 block"><span>Contraseña</span><div className="relative mt-1"><input className="w-full pr-12" type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /><button type="button" className="absolute inset-y-0 right-2 my-auto grid h-10 w-10 place-items-center" aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"} aria-pressed={showPassword} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={20} /> : <Eye size={20} />}</button></div></label>
         <button disabled={busy} className="w-full bg-[#13263d] text-white hover:bg-[#1d3a5b]" type="submit"><LogIn /> {busy ? "Validando..." : "Entrar como ADMIN"}</button>
       </form>}
       {error && <p role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
