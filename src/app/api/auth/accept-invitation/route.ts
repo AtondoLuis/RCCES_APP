@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AccessError, apiError, requireSameOrigin } from "@/lib/admin-access";
@@ -11,12 +11,12 @@ const schema = z.object({
 }).strict();
 
 function normalizePhone(value: string) {
-  const digits = value.replace(/\\D/g, "");
+  const digits = value.replace(/\D/g, "");
   const national = digits.startsWith("52") && digits.length === 12 ? digits.slice(2) : digits;
   return national.length === 10 ? `+52${national}` : null;
 }
 function normalizeCode(value: string) {
-  return value.toUpperCase().replace(/[\\s-]/g, "");
+  return value.toUpperCase().replace(/[\s-]/g, "");
 }
 function hashCode(value: string) {
   return createHash("sha256").update(normalizeCode(value)).digest("hex");
