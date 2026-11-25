@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
-import { APP_PERMISSIONS, APP_PERMISSION_KEYS, APP_ROLES } from "@/lib/permissions";
+import { APP_PERMISSIONS, APP_PERMISSION_KEYS, APP_ROLES, type AppRole } from "@/lib/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AccessError, type requireAdmin } from "@/lib/admin-access";
 const phoneContact = z.union([z.string().trim().max(40), z.null()]).optional().transform((value) => {
