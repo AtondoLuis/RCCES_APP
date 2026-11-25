@@ -146,7 +146,7 @@ const phoneInvitationSchema = z.object({
 }).strict();
 
 function normalizedInviteCode(value: string) {
-  return value.toUpperCase().replace(/[\\s-]/g, "");
+  return value.toUpperCase().replace(/[\s-]/g, "");
 }
 
 export async function createPhoneInvitation(context: Context, body: unknown) {
