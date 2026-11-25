@@ -162,6 +162,9 @@ export async function createPhoneInvitation(context: Context, body: unknown) {
     throw new AccessError(400, detail);
   }
   const input = parsed.data;
+  if (!input.profile_id && input.role === "ADMIN") {
+    throw new AccessError(400, "ADMIN debe usar correo y contraseña; no se puede invitar con celular.");
+  }
   const admin = authAdmin();
   let profileId = input.profile_id ?? null;
   let invite = {
