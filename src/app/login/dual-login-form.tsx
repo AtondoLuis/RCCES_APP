@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, LogIn, Smartphone } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { phoneAuthEmail } from "@/lib/phone-auth";
 
 type Method = "email" | "phone";
 function normalizeMexicanPhone(value: string) {
@@ -50,7 +51,7 @@ export default function DualLoginForm() {
     if (!normalized) return setError("Captura un número celular mexicano de 10 dígitos.");
     setBusy(true);
     setError("");
-    const { error: signInError } = await supabase.auth.signInWithPassword({ phone: normalized, password });
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email: phoneAuthEmail(normalized), password });
     if (signInError) {
       setBusy(false);
       return setError(safeAuthError());
