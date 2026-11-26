@@ -1,5 +1,5 @@
 import { apiError, requireAdmin, requireSameOrigin, AccessError } from "@/lib/admin-access";
-import { inviteAppUser, listAppUsers, updateAppUser } from "@/lib/user-admin";
+import { createPhoneInvitation, listAppUsers, updateAppUser } from "@/lib/user-admin";
 export async function GET(request: Request) {
   try {
     const context = await requireAdmin();
@@ -14,7 +14,7 @@ async function mutate(request: Request, invite: boolean) {
     const context = await requireAdmin();
     let body: unknown;
     try { body = await request.json(); } catch { throw new AccessError(400, "JSON invalido."); }
-    return Response.json(invite ? await inviteAppUser(context, body) : await updateAppUser(context, body), { status: invite ? 201 : 200 });
+    return Response.json(invite ? await createPhoneInvitation(context, body) : await updateAppUser(context, body), { status: invite ? 201 : 200 });
   } catch (error) { return apiError(error); }
 }
 export const POST = (request: Request) => mutate(request, true);
