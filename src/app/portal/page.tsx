@@ -8,7 +8,8 @@ import { isCategoryVisible, isServiceVisible, previewVisibility, type PreviewVis
 import { createClient } from "@/lib/supabase/client";
 
 type Profile = { id: string; full_name: string | null; email: string | null; phone_contact: string | null; phone_verified_at: string | null; person_id: string | null };
-type Person = { id: string; first_name: string; last_name: string; display_name: string | null; class_id: string | null; gender: string | null; email: string | null; phone: string | null };
+type Person = { id: string; parish_id: string; first_name: string; last_name: string; display_name: string | null; class_id: string | null; gender: string | null; email: string | null; phone: string | null; birth_day: number | null; birth_month: number | null };
+type BirthdayPerson = { id: string; first_name: string; last_name: string; display_name: string | null; birth_day: number; birth_month: number };
 type Assignment = { mass_id: string; service_id: string; services: { id: string; name: string; category_id: string; active: boolean } | { id: string; name: string; category_id: string; active: boolean }[] | null };
 type Commission = { id: string; mass_date: string; mass_time_id: string; title: string; subtitle: string | null; preview_visibility: PreviewVisibility | null };
 type MassTime = { id: string; name: string; time: string };
@@ -17,7 +18,7 @@ type ActivityParticipant = { activity_id: string; community_activities: { id: st
 type Attendance = { activity_id: string; status: "pending" | "present" | "absent" };
 type FundraisingParticipant = { event_id: string; required_amount: number; fundraising_events: { id: string; name: string; status: string; deadline: string | null } | { id: string; name: string; status: string; deadline: string | null }[] | null };
 type Payment = { event_id: string; amount: number; paid_at: string; status: string };
-type PortalData = { profile: Profile; person: Person; commissions: Commission[]; times: MassTime[]; assignments: Assignment[]; notices: Notice[]; activities: ActivityParticipant[]; attendance: Attendance[]; fundraising: FundraisingParticipant[]; payments: Payment[] };
+type PortalData = { profile: Profile; person: Person; commissions: Commission[]; times: MassTime[]; assignments: Assignment[]; notices: Notice[]; activities: ActivityParticipant[]; attendance: Attendance[]; fundraising: FundraisingParticipant[]; payments: Payment[]; birthdays: BirthdayPerson[] };
 
 const todayInTijuana = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Tijuana", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const timeInTijuana = () => new Intl.DateTimeFormat("en-GB", { timeZone: "America/Tijuana", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date());
@@ -43,22 +44,23 @@ export default function PortalPage() {
         return;
       }
       const profile = profileResult.data as Profile;
-      const personResult = await supabase.from("people").select("id,first_name,last_name,display_name,class_id,gender,email,phone").eq("id", profile.person_id).maybeSingle();
+      const personResult = await supabase.from("people").select("id,parish_id,first_name,last_name,display_name,class_id,gender,email,phone,birth_day,birth_month").eq("id", profile.person_id).maybeSingle();
       if (personResult.error || !personResult.data) {
         setError(personResult.error?.message ?? "No se encontró tu perfil de servidor vinculado.");
         setBusy(false);
         return;
       }
       const person = personResult.data as Person;
-      const [assignmentResult, noticeResult, activityResult, attendanceResult, participantResult, paymentResult] = await Promise.all([
+      const [assignmentResult, noticeResult, activityResult, attendanceResult, participantResult, paymentResult, birthdayResult] = await Promise.all([
         supabase.from("mass_assignments").select("mass_id,service_id,services(id,name,category_id,active)").eq("person_id", person.id),
         supabase.from("announcements").select("id,title,description,published_at,expires_at,priority,activity_id,announcement_reads(read_at)").eq("status", "published").order("published_at", { ascending: false }),
         supabase.from("activity_participants").select("activity_id,community_activities(id,name,activity_date,start_time,status)").eq("server_id", person.id),
         supabase.from("attendance_records").select("activity_id,status").eq("server_id", person.id),
         supabase.from("fundraising_participants").select("event_id,required_amount,fundraising_events(id,name,status,deadline)").eq("server_id", person.id),
         supabase.from("fundraising_payments").select("event_id,amount,paid_at,status").eq("server_id", person.id).order("paid_at", { ascending: false }),
+        supabase.from("people").select("id,first_name,last_name,display_name,birth_day,birth_month").eq("parish_id", person.parish_id).eq("active", true).not("birth_day", "is", null).not("birth_month", "is", null).order("birth_month").order("birth_day"),
       ]);
-      const failed = [assignmentResult, noticeResult, activityResult, attendanceResult, participantResult, paymentResult].find((result) => result.error);
+      const failed = [assignmentResult, noticeResult, activityResult, attendanceResult, participantResult, paymentResult, birthdayResult].find((result) => result.error);
       if (failed?.error) { setError(failed.error.message); setBusy(false); return; }
       const assignments = (assignmentResult.data ?? []) as Assignment[];
       const massIds = [...new Set(assignments.map((item) => item.mass_id))];
@@ -75,7 +77,7 @@ export default function PortalPage() {
         profile, person, commissions, times: (timesResult.data ?? []) as MassTime[], assignments,
         notices: (noticeResult.data ?? []) as Notice[], activities: (activityResult.data ?? []) as ActivityParticipant[],
         attendance: (attendanceResult.data ?? []) as Attendance[], fundraising: (participantResult.data ?? []) as FundraisingParticipant[],
-        payments: (paymentResult.data ?? []) as Payment[],
+        payments: (paymentResult.data ?? []) as Payment[], birthdays: (birthdayResult.data ?? []) as BirthdayPerson[],
       });
       setBusy(false);
     }
@@ -105,6 +107,17 @@ export default function PortalPage() {
   const notices = data.notices;
   const today = todayInTijuana();
   const localTime = timeInTijuana();
+  const todayDate = new Date(`${today}T00:00:00.000Z`);
+  const year = todayDate.getUTCFullYear();
+  const birthdayDates = data.birthdays.map((birthday) => {
+    const nextDate = new Date(Date.UTC(year, birthday.birth_month - 1, birthday.birth_day));
+    if (nextDate < todayDate) nextDate.setUTCFullYear(year + 1);
+    const previousDate = new Date(Date.UTC(year, birthday.birth_month - 1, birthday.birth_day));
+    if (previousDate >= todayDate) previousDate.setUTCFullYear(year - 1);
+    return { birthday, nextDate, previousDate, daysUntil: Math.round((nextDate.getTime() - todayDate.getTime()) / 86400000), daysSince: Math.round((todayDate.getTime() - previousDate.getTime()) / 86400000) };
+  });
+  const upcomingBirthdays = birthdayDates.filter((item) => item.daysUntil <= 30).sort((a, b) => a.daysUntil - b.daysUntil);
+  const previousBirthdays = birthdayDates.filter((item) => item.daysSince >= 1 && item.daysSince <= 30).sort((a, b) => a.daysSince - b.daysSince);
   const upcomingCommissions = data.commissions.filter((commission) => {
     if (commission.mass_date > today) return true;
     if (commission.mass_date < today) return false;
@@ -132,7 +145,7 @@ export default function PortalPage() {
       <p className="mt-2 text-sm text-slate-200">Consulta aquí tus comisiones, avisos, asistencias y aportaciones.</p>
     </header>
     <nav aria-label="Secciones del portal" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-      {[["#inicio", "Inicio"], ["#comisiones", "Mis comisiones"], ["#avisos", "Avisos"], ["#asistencias", "Mis asistencias"], ["#aportaciones", "Mis aportaciones"], ["#perfil", "Mi perfil"]].map(([href, label]) => <Link className="rounded-lg border bg-white p-3 text-center text-sm font-bold text-[#13263d] shadow-sm" key={href} href={href}>{label}</Link>)}
+      {[["#inicio", "Inicio"], ["#cumpleanos", "Cumpleaños"], ["#comisiones", "Mis comisiones"], ["#avisos", "Avisos"], ["#asistencias", "Mis asistencias"], ["#aportaciones", "Mis aportaciones"], ["#perfil", "Mi perfil"]].map(([href, label]) => <Link className="rounded-lg border bg-white p-3 text-center text-sm font-bold text-[#13263d] shadow-sm" key={href} href={href}>{label}</Link>)}
     </nav>
     {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-800">{error}</p>}
     {saved && <p role="status" className="text-sm font-semibold text-emerald-800">{saved}</p>}
@@ -141,6 +154,14 @@ export default function PortalPage() {
       <a className="card-panel p-4" href="#avisos"><b>Avisos pendientes</b><p className="mt-2 text-2xl font-black">{unreadCount}</p></a>
       <a className="card-panel p-4" href="#comisiones"><b>Próximas comisiones</b><p className="mt-2 text-2xl font-black">{upcomingCommissions.length}</p></a>
       <a className="card-panel p-4" href="#asistencias"><b>Asistencia registrada</b><p className="mt-2 text-2xl font-black">{attendancePercent === null ? "Sin datos" : `${attendancePercent}%`}</p></a>
+    </section>
+
+    <section id="cumpleanos" className="card-panel scroll-mt-24 p-4 sm:p-6">
+      <div className="mb-4"><h2 className="text-xl font-bold">Cumpleaños de servidores</h2><p className="mt-1 text-sm text-slate-600">Fechas de la comunidad, sin mostrar el año de nacimiento.</p></div>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div><h3 className="mb-2 font-bold">Próximos 30 días</h3>{!upcomingBirthdays.length ? <p className="text-sm text-slate-600">No hay cumpleaños próximos en este periodo.</p> : <ul className="divide-y">{upcomingBirthdays.map(({ birthday, nextDate, daysUntil }) => <li key={birthday.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span className="font-semibold">{birthday.display_name || `${birthday.first_name} ${birthday.last_name}`.trim()}</span><span className="text-sm text-slate-600">{new Intl.DateTimeFormat("es-MX", { day: "numeric", month: "long", timeZone: "UTC" }).format(nextDate)} · {daysUntil === 0 ? "hoy" : daysUntil === 1 ? "mañana" : `en ${daysUntil} días`}</span></li>)}</ul>}</div>
+        <div><h3 className="mb-2 font-bold">Cumpleaños anteriores · últimos 30 días</h3>{!previousBirthdays.length ? <p className="text-sm text-slate-600">No hubo cumpleaños anteriores en este periodo.</p> : <ul className="divide-y">{previousBirthdays.map(({ birthday, previousDate, daysSince }) => <li key={birthday.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span className="font-semibold">{birthday.display_name || `${birthday.first_name} ${birthday.last_name}`.trim()}</span><span className="text-sm text-slate-600">{new Intl.DateTimeFormat("es-MX", { day: "numeric", month: "long", timeZone: "UTC" }).format(previousDate)} · {daysSince === 1 ? "ayer" : `hace ${daysSince} días`}</span></li>)}</ul>}</div>
+      </div>
     </section>
 
     <section id="comisiones" className="card-panel scroll-mt-24 p-4 sm:p-6">
