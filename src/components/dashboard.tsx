@@ -224,6 +224,7 @@ function HeaderPatronImage({ src }: { src?: string | null }) {
 }
 function State({ text }: { text: string }) { return <div className="card-panel p-6 text-slate-600">{text}</div>; }
 function formatDate(date: string) { return new Intl.DateTimeFormat("es-MX", { day: "numeric", month: "long", year: "numeric" }).format(new Date(`${date}T12:00:00`)); }
+function formatBirthday(day: number | null, month: number | null) { return day && month ? new Intl.DateTimeFormat("es-MX", { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(Date.UTC(2024, month - 1, day))) : "Sin registrar"; }
 function timeName(times: MassTime[], id: string) { return times.find((t) => t.id === id)?.name ?? "Sin hora"; }
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block"><span className="mb-1 block text-sm font-bold text-slate-700">{label}</span>{children}</label>; }
 function Home({ masses, people, services, massTimes, parishId }: { masses: Mass[]; people: Person[]; services: Service[]; massTimes: MassTime[]; parishId: string }) {
@@ -335,6 +336,7 @@ function PeopleView({ parishId, canEdit, personId, people, services, categories,
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState<PeopleStatusFilter>("active");
   const [classFilter, setClassFilter] = useState<ServerClassFilter>("all");
+  const [birthMonthFilter, setBirthMonthFilter] = useState("all");
   const editing = personId && personId !== "nuevo" ? people.find((person) => person.id === personId) : null;
   const [form, setForm] = useState<Person>(editing ?? { id: "", parish_id: parishId, first_name: "", last_name: "", display_name: "", phone: "", whatsapp: "", email: "", gender: "female", birth_day: null, birth_month: null, active: true, notes: "", class_id: null, services: [] });
   useEffect(() => { if (editing) window.setTimeout(() => setForm(editing), 0); }, [editing]);
@@ -356,29 +358,33 @@ function PeopleView({ parishId, canEdit, personId, people, services, categories,
 
   if (!personId) {
     const summary = countPeopleSummary(people, parishId, classFilter, stateFilter);
-    const filtered = people.filter((person) => person.parish_id === parishId && matchesPeopleFilter(person, search, stateFilter, classFilter));
+    const filtered = people.filter((person) => person.parish_id === parishId && matchesPeopleFilter(person, search, stateFilter, classFilter)
+      && (birthMonthFilter === "all" || (birthMonthFilter === "none" ? person.birth_month === null : person.birth_month === Number(birthMonthFilter))));
     return <>
       <div className="mb-5 flex flex-wrap justify-between gap-3"><h1 className="text-2xl font-bold">Servidores</h1>{canEdit && <Link className="button-link primary bg-[#13263d] text-sm text-white hover:bg-[#1d3a5b]" href="/servidores/nuevo"><Plus size={17}/> Nuevo servidor</Link>}</div>
-      <div className="mb-4 grid gap-3 rounded-lg border bg-white p-4 sm:grid-cols-3">
-        <label className="text-sm font-bold">Buscar servidor<input className="mt-1 w-full" placeholder="Nombre o email" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+      <div className="mb-4 grid gap-3 rounded-lg border bg-white p-4 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="text-sm font-bold">Buscar servidor<input className="mt-1 w-full" placeholder="Nombre, teléfono o email" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
         <label className="text-sm font-bold">Estado<select aria-label="Estado de servidores" className="mt-1 w-full" value={stateFilter} onChange={(event) => setStateFilter(event.target.value as PeopleStatusFilter)}><option value="active">Activos</option><option value="inactive">Inactivos</option><option value="all">Todos</option></select></label>
         <label className="text-sm font-bold">Clase<select aria-label="Filtrar por clase" className="mt-1 w-full" value={classFilter} onChange={(event) => setClassFilter(event.target.value as ServerClassFilter)}><option value="all">Todas las clases</option>{SERVER_CLASSES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}<option value="unassigned">Sin asignar</option></select></label>
+        <label className="text-sm font-bold">Mes de cumpleaños<select aria-label="Filtrar por mes de cumpleaños" className="mt-1 w-full" value={birthMonthFilter} onChange={(event) => setBirthMonthFilter(event.target.value)}><option value="all">Todos los meses</option><option value="none">Sin registrar</option>{["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"].map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select></label>
       </div>
       <div role="status" aria-live="polite" aria-label="Resumen de servidores" className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border bg-white px-4 py-3 text-sm">
         <span><b>Activos: {summary.active}</b></span>
         <span><b>Inactivos: {summary.inactive}</b></span>
         <span className="text-slate-600">{classFilter === "all" ? `${summary.total} servidores${stateFilter === "active" ? " activos" : stateFilter === "inactive" ? " inactivos" : ""} en total` : `${summary.matchingClass}/${summary.total} servidores${stateFilter === "active" ? " activos" : stateFilter === "inactive" ? " inactivos" : ""} en esta clase`}</span>
+        <span className="text-slate-600">Mostrados: {filtered.length}</span>
       </div>
       {filtered.length ? <>
-        <div className="hidden grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)_minmax(0,0.8fr)_minmax(0,1.3fr)] gap-4 border-b px-3 pb-2 text-xs font-bold uppercase tracking-wide text-slate-500 lg:grid">
-          <span>Nombre</span><span>Email</span><span>Estado</span><span>Clase</span>
+        <div className="hidden grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,0.75fr)_minmax(0,0.95fr)_minmax(0,0.9fr)] gap-4 border-b px-3 pb-2 text-xs font-bold uppercase tracking-wide text-slate-500 lg:grid">
+          <span>Nombre</span><span>Teléfono</span><span>Estado</span><span>Clase</span><span>Cumpleaños</span>
         </div>
         <div className="divide-y rounded-lg border bg-white">
-          {filtered.map((person) => <Link key={person.id} href={`/servidores/${person.id}`} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-3 py-2 text-sm transition hover:bg-slate-50 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)_minmax(0,0.8fr)_minmax(0,1.3fr)] lg:gap-4" aria-label={`Abrir servidor ${person.display_name || `${person.first_name} ${person.last_name}`}`}>
+          {filtered.map((person) => <Link key={person.id} href={`/servidores/${person.id}`} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-3 py-2 text-sm transition hover:bg-slate-50 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,0.75fr)_minmax(0,0.95fr)_minmax(0,0.9fr)] lg:gap-4" aria-label={`Abrir servidor ${person.display_name || `${person.first_name} ${person.last_name}`}`}>
             <b className="min-w-0 break-words lg:truncate" title={person.display_name || `${person.first_name} ${person.last_name}`}>{person.display_name || `${person.first_name} ${person.last_name}`}</b>
-            <span className="order-3 min-w-0 break-all text-slate-600 lg:order-none lg:truncate" title={person.email || "Sin email"}>{person.email || "Sin email"}</span>
+            <span className="order-3 min-w-0 break-all text-slate-600 lg:order-none lg:truncate" title={person.phone || "Sin teléfono"}>{person.phone || "Sin teléfono"}</span>
             <span className="order-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 lg:order-none lg:justify-self-start">{person.active ? "Activo" : "Inactivo"}</span>
             <span className="order-4 min-w-0 break-words text-slate-600 lg:order-none lg:truncate" title={serverClassLabel(person.class_id)}>{serverClassLabel(person.class_id)}</span>
+            <span className="order-5 min-w-0 text-slate-600 lg:order-none" title="Cumpleaños">{formatBirthday(person.birth_day, person.birth_month)}</span>
           </Link>)}
         </div>
       </> : <p role="status" className="card-panel p-4 text-sm text-slate-600">No hay servidores que coincidan con los filtros.</p>}
