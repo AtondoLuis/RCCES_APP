@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { phoneAuthEmail } from "@/lib/phone-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AccessError, apiError, requireSameOrigin } from "@/lib/admin-access";
 
@@ -58,6 +59,7 @@ export async function POST(request: Request) {
         throw invalidInvite();
       }
       const authUpdate = await admin.auth.admin.updateUserById(found.data.profile_id, {
+        email: phoneAuthEmail(phone), email_confirm: true,
         phone, phone_confirm: true, password: parsed.data.password,
       });
       if (authUpdate.error) {
@@ -73,6 +75,7 @@ export async function POST(request: Request) {
       }
     } else {
       const created = await admin.auth.admin.createUser({
+        email: phoneAuthEmail(phone), email_confirm: true,
         phone, phone_confirm: true, password: parsed.data.password,
         user_metadata: { full_name: found.data.full_name },
       });
