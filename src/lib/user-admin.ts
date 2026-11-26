@@ -83,11 +83,16 @@ export async function listAppUsers(context: Context, page = 0) {
   }
   const admin = process.env.SUPABASE_SERVICE_ROLE_KEY ? authAdmin() : null;
   const users = await Promise.all((profiles.data ?? []).map(async (profile) => {
-    if (!admin) return { ...profile, permission_overrides: permissionMap.get(profile.id) ?? [], last_sign_in_at: null, pending_invitation: null };
-    const { data, error } = await admin.auth.admin.getUserById(profile.id);
-    if (error) throw new AccessError(503, "No se pudo consultar el estado de acceso de los usuarios.");
-    return { ...profile, permission_overrides: permissionMap.get(profile.id) ?? [], last_sign_in_at: data.user.last_sign_in_at ?? null,
-      pending_invitation: !!data.user.invited_at && !data.user.last_sign_in_at && !data.user.email_confirmed_at };
+    const base = { ...profile, permission_overrides: permissionMap.get(profile.id) ?? [] };
+    if (!admin) return { ...base, last_sign_in_at: null, pending_invitation: null };
+    try {
+      const { data, error } = await admin.auth.admin.getUserById(profile.id);
+      if (error || !data.user) return { ...base, last_sign_in_at: null, pending_invitation: null };
+      return { ...base, last_sign_in_at: data.user.last_sign_in_at ?? null,
+        pending_invitation: !!data.user.invited_at && !data.user.last_sign_in_at && !data.user.email_confirmed_at };
+    } catch {
+      return { ...base, last_sign_in_at: null, pending_invitation: null };
+    }
   }));
   return { users, people, total: profiles.count ?? 0, invitationsConfigured: !!admin, actorId: context.actorId };
 }
