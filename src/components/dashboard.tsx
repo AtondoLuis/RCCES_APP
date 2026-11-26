@@ -375,16 +375,12 @@ function PeopleView({ parishId, canEdit, personId, people, services, categories,
         <span className="text-slate-600">Mostrados: {filtered.length}</span>
       </div>
       {filtered.length ? <>
-        <div className="hidden grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,0.75fr)_minmax(0,0.95fr)_minmax(0,0.9fr)] gap-4 border-b px-3 pb-2 text-xs font-bold uppercase tracking-wide text-slate-500 lg:grid">
-          <span>Nombre</span><span>Teléfono</span><span>Estado</span><span>Clase</span><span>Cumpleaños</span>
-        </div>
         <div className="divide-y rounded-lg border bg-white">
-          {filtered.map((person) => <Link key={person.id} href={`/servidores/${person.id}`} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-3 py-2 text-sm transition hover:bg-slate-50 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,0.75fr)_minmax(0,0.95fr)_minmax(0,0.9fr)] lg:gap-4" aria-label={`Abrir servidor ${person.display_name || `${person.first_name} ${person.last_name}`}`}>
-            <b className="min-w-0 break-words lg:truncate" title={person.display_name || `${person.first_name} ${person.last_name}`}>{person.display_name || `${person.first_name} ${person.last_name}`}</b>
-            <span className="order-3 min-w-0 break-all text-slate-600 lg:order-none lg:truncate" title={person.phone || "Sin teléfono"}>{person.phone || "Sin teléfono"}</span>
-            <span className="order-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 lg:order-none lg:justify-self-start">{person.active ? "Activo" : "Inactivo"}</span>
-            <span className="order-5 min-w-0 break-words text-slate-600 lg:order-none lg:truncate" title={serverClassLabel(person.class_id)}>{serverClassLabel(person.class_id)}</span>
-            <span className="order-4 min-w-0 text-slate-600 lg:order-none" title="Cumpleaños">{formatBirthday(person.birth_day, person.birth_month)}</span>
+          {filtered.map((person) => <Link key={person.id} href={`/servidores/${person.id}`} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-3 py-2 text-sm transition hover:bg-slate-50" aria-label={`Abrir servidor ${person.display_name || `${person.first_name} ${person.last_name}`}`}>
+            <div className="min-w-0 break-words"><b title={person.display_name || `${person.first_name} ${person.last_name}`}>{person.display_name || `${person.first_name} ${person.last_name}`}</b>{person.birth_day && person.birth_month && <span className="ml-1 text-slate-600">({formatBirthday(person.birth_day, person.birth_month)})</span>}</div>
+            <span className="order-3 min-w-0 break-all text-slate-600" title={person.phone || "Sin teléfono"}>{person.phone || "Sin teléfono"}</span>
+            <span className="order-2 justify-self-end rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">{person.active ? "Activo" : "Inactivo"}</span>
+            <span className="order-4 min-w-0 break-words text-right text-slate-600" title={serverClassLabel(person.class_id)}>{serverClassLabel(person.class_id)}</span>
           </Link>)}
         </div>
       </> : <p role="status" className="card-panel p-4 text-sm text-slate-600">No hay servidores que coincidan con los filtros.</p>}
