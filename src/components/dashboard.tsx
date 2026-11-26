@@ -21,7 +21,7 @@ import { SERVER_CLASSES, serverClassLabel, type ServerClassFilter, type ServerCl
 type Role = AppRole;
 type Category = { id: string; name: string; display_order: number };
 type Service = { id: string; stable_key: string | null; slug: string | null; category_id: string; name: string; allow_multiple_people: boolean; required_servers: number; active: boolean; display_order: number };
-type Person = { id: string; parish_id: string; first_name: string; last_name: string; display_name: string | null; phone: string | null; whatsapp: string | null; email: string | null; gender: string | null; active: boolean; notes: string | null; class_id: ServerClassId | null; services: string[] };
+type Person = { id: string; parish_id: string; first_name: string; last_name: string; display_name: string | null; phone: string | null; whatsapp: string | null; email: string | null; gender: string | null; birth_day: number | null; birth_month: number | null; active: boolean; notes: string | null; class_id: ServerClassId | null; services: string[] };
 type MassTime = { id: string; name: string; time: string; active: boolean; display_order: number };
 type Parish = { id: string; name: string; logo_url: string | null; patron_image_url: string | null; address: string | null; phone: string | null };
 type SettingsRow = { women_clothing: string | null; men_clothing: string | null; general_clothing: string | null; default_notes: string | null; allow_multiple_services: boolean };
@@ -336,12 +336,14 @@ function PeopleView({ parishId, canEdit, personId, people, services, categories,
   const [stateFilter, setStateFilter] = useState<PeopleStatusFilter>("active");
   const [classFilter, setClassFilter] = useState<ServerClassFilter>("all");
   const editing = personId && personId !== "nuevo" ? people.find((person) => person.id === personId) : null;
-  const [form, setForm] = useState<Person>(editing ?? { id: "", parish_id: parishId, first_name: "", last_name: "", display_name: "", phone: "", whatsapp: "", email: "", gender: "female", active: true, notes: "", class_id: null, services: [] });
+  const [form, setForm] = useState<Person>(editing ?? { id: "", parish_id: parishId, first_name: "", last_name: "", display_name: "", phone: "", whatsapp: "", email: "", gender: "female", birth_day: null, birth_month: null, active: true, notes: "", class_id: null, services: [] });
   useEffect(() => { if (editing) window.setTimeout(() => setForm(editing), 0); }, [editing]);
 
   async function save() {
     if (!supabase || !canEdit) return;
-    const row = { parish_id: parishId, first_name: form.first_name, last_name: form.last_name, display_name: form.display_name, phone: form.phone, whatsapp: form.whatsapp, email: form.email, gender: form.gender, active: form.active, notes: form.notes, class_id: form.class_id };
+    if ((form.birth_day === null) !== (form.birth_month === null)) { alert("Captura el día y el mes de nacimiento, o deja ambos vacíos."); return; }
+    if (form.birth_day !== null && form.birth_month !== null && form.birth_day > new Date(2024, form.birth_month, 0).getDate()) { alert("El día no es válido para el mes seleccionado."); return; }
+    const row = { parish_id: parishId, first_name: form.first_name, last_name: form.last_name, display_name: form.display_name, phone: form.phone, whatsapp: form.whatsapp, email: form.email, gender: form.gender, birth_day: form.birth_day, birth_month: form.birth_month, active: form.active, notes: form.notes, class_id: form.class_id };
     const { data, error } = form.id
       ? await supabase.from("people").update(row).eq("id", form.id).eq("parish_id", parishId).select("id").single()
       : await supabase.from("people").insert(row).select("id").single();
@@ -393,6 +395,8 @@ function PeopleView({ parishId, canEdit, personId, people, services, categories,
       <Field label="WhatsApp"><input disabled={!canEdit} value={form.whatsapp ?? ""} onChange={(event) => setForm({ ...form, whatsapp: event.target.value })}/></Field>
       <Field label="Email"><input disabled={!canEdit} value={form.email ?? ""} onChange={(event) => setForm({ ...form, email: event.target.value })}/></Field>
       <Field label="Sexo"><select disabled={!canEdit} value={form.gender ?? ""} onChange={(event) => setForm({ ...form, gender: event.target.value })}><option value="female">Mujer</option><option value="male">Hombre</option><option value="other">Otro</option></select></Field>
+      <Field label="Día de nacimiento"><input disabled={!canEdit} type="number" min={1} max={31} step={1} value={form.birth_day ?? ""} onChange={(event) => setForm({ ...form, birth_day: event.target.value ? event.target.valueAsNumber : null })}/></Field>
+      <Field label="Mes de nacimiento"><select disabled={!canEdit} value={form.birth_month ?? ""} onChange={(event) => setForm({ ...form, birth_month: event.target.value ? Number(event.target.value) : null })}><option value="">Sin especificar</option>{["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"].map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select></Field>
       <Field label="Clase"><select aria-label="Clase del servidor" disabled={!canEdit} value={form.class_id ?? ""} onChange={(event) => setForm({ ...form, class_id: (event.target.value || null) as ServerClassId | null })}><option value="">Sin asignar</option>{SERVER_CLASSES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></Field>
     </div>
     <label className="checkbox-field mt-4 text-sm"><input disabled={!canEdit} type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })}/><span>Activo</span></label>
