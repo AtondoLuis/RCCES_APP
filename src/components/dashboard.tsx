@@ -383,8 +383,8 @@ function PeopleView({ parishId, canEdit, personId, people, services, categories,
             <b className="min-w-0 break-words lg:truncate" title={person.display_name || `${person.first_name} ${person.last_name}`}>{person.display_name || `${person.first_name} ${person.last_name}`}</b>
             <span className="order-3 min-w-0 break-all text-slate-600 lg:order-none lg:truncate" title={person.phone || "Sin teléfono"}>{person.phone || "Sin teléfono"}</span>
             <span className="order-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 lg:order-none lg:justify-self-start">{person.active ? "Activo" : "Inactivo"}</span>
-            <span className="order-4 min-w-0 break-words text-slate-600 lg:order-none lg:truncate" title={serverClassLabel(person.class_id)}>{serverClassLabel(person.class_id)}</span>
-            <span className="order-5 min-w-0 text-slate-600 lg:order-none" title="Cumpleaños">{formatBirthday(person.birth_day, person.birth_month)}</span>
+            <span className="order-5 min-w-0 break-words text-slate-600 lg:order-none lg:truncate" title={serverClassLabel(person.class_id)}>{serverClassLabel(person.class_id)}</span>
+            <span className="order-4 min-w-0 text-slate-600 lg:order-none" title="Cumpleaños">{formatBirthday(person.birth_day, person.birth_month)}</span>
           </Link>)}
         </div>
       </> : <p role="status" className="card-panel p-4 text-sm text-slate-600">No hay servidores que coincidan con los filtros.</p>}
