@@ -12,15 +12,15 @@ function NotfinityLogo() {
     <svg
       aria-label="notfinity.com"
       role="img"
-      viewBox="0 0 190 32"
-      className="h-7 w-[166px] sm:h-8 sm:w-[190px]"
+      viewBox="0 0 184 32"
+      className="h-7 w-[156px] sm:h-8 sm:w-[184px]"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
-      <path d="M2 27V5h5l14 14V5h5v22h-5L7 13v14H2Z" fill="white" />
-      <path d="M18 12.2c4.4-4.6 9.7-7.3 14-7.3 4.2 0 7.1 2.5 7.1 5.9 0 3.5-3.7 7-8.2 7-2.9 0-5.1-1.3-7.1-3.5" stroke="#1478E8" strokeWidth="4.5" strokeLinecap="round" />
-      <path d="M39 19.8c-4.4 4.6-9.7 7.3-14 7.3-4.2 0-7.1-2.5-7.1-5.9 0-3.5 3.7-7 8.2-7 2.9 0 5.1 1.3 7.1 3.5" stroke="#1478E8" strokeWidth="4.5" strokeLinecap="round" />
-      <text x="46" y="23" fill="white" fontFamily="Arial, sans-serif" fontSize="19" fontWeight="700" textDecoration="underline">notfinity.com</text>
+      <path d="M2 27V5h5l20 17V27h-5L7 13v14H2Z" fill="white" />
+      <path d="M23 17.5c5-5.6 10.5-11.2 16.2-11.2 4.1 0 7.1 2.3 7.1 5.3 0 3.3-3.7 6.4-8.2 6.4-3.1 0-5.3-1.4-7.6-3.7" stroke="#1478E8" strokeWidth="4.2" strokeLinecap="round" />
+      <path d="M31 14.5c-5 5.6-10.5 11.2-16.2 11.2-4.1 0-7.1-2.3-7.1-5.3 0-3.3 3.7-6.4 8.2-6.4 3.1 0 5.3 1.4 7.6 3.7" stroke="#1478E8" strokeWidth="4.2" strokeLinecap="round" />
+      <text x="52" y="22.5" fill="white" fontFamily="Arial, sans-serif" fontSize="17" fontWeight="700" textDecoration="underline">notfinity.com</text>
     </svg>
   );
 }
