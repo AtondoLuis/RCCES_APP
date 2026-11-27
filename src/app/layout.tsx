@@ -19,7 +19,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Visitar notfinity.com"
-            className="inline-flex items-center gap-2 font-extrabold text-white underline underline-offset-2"
+            className="inline-flex items-center gap-2 font-extrabold underline underline-offset-2"
+            style={{ color: "#f5f6f7" }}
           >
             <img
               src="/notfinity-official-dark.svg"
